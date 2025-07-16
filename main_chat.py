@@ -1,10 +1,11 @@
 from flask import Flask, request, jsonify
-from handlers import certificate_handler, attendance_handler, leave_handler
-from dotenv import load_dotenv
-
-load_dotenv()
+from flask_cors import CORS
+from handlers import (
+    certificate_handler,
+)  # attendance_handler, leave_handler도 같은 방식으로 준비
 
 app = Flask(__name__)
+CORS(app)  # 모든 도메인에서 오는 요청 허용 (개발환경용)
 
 
 def classify_topic(user_input: str) -> str:
@@ -28,15 +29,15 @@ def answer():
     topic = classify_topic(user_input)
 
     if topic == "certificate":
-        return jsonify({"response": certificate_handler.answer(user_input)})
-    elif topic == "attendance":
-        return jsonify({"response": attendance_handler.answer(user_input)})
-    elif topic == "leave":
-        return jsonify({"response": leave_handler.answer(user_input)})
+        response_text = certificate_handler.answer(user_input)
+    # elif topic == "attendance":
+    #     response_text = attendance_handler.answer(user_input)
+    # elif topic == "leave":
+    #     response_text = leave_handler.answer(user_input)
     else:
-        return jsonify(
-            {"response": "🤖 이 질문은 아직 지원하지 않아요. 다시 질문해 주세요."}
-        )
+        response_text = "🤖 이 질문은 아직 지원하지 않아요. 다시 질문해 주세요."
+
+    return jsonify({"response": response_text})
 
 
 if __name__ == "__main__":
