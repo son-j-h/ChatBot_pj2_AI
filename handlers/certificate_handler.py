@@ -1,4 +1,5 @@
 from dotenv import load_dotenv
+import os
 
 load_dotenv()
 
@@ -10,7 +11,7 @@ llm = OpenAI(temperature=0)
 
 embeddings = OpenAIEmbeddings()
 vector_db = Chroma(
-    persist_directory="C:/Users/user/IdeaVsProject/my_chatbot_project/my_rag_db",
+    persist_directory = os.path.join(os.getcwd(), "my_rag_db"),
     embedding_function=embeddings,
 )
 
