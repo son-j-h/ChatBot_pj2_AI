@@ -17,11 +17,12 @@ embedding_model = OpenAIEmbeddings(
 )
 
 # 벡터 DB가 저장될 폴더 생성
-VECTOR_DIR = "./attendance_db"
-COLLECTION_NAME = "leave_docs"
+VECTOR_DIR = "../my_rag_db"
+COLLECTION_NAME = "admin_docs"
 
 doc_paths = [
-    "attendance_guide.txt"
+    "training_handbook.txt",
+    "attendance_guide.txt",
 ]
 
 # 벡터 DB화 시킬 문서가 존재하지 않을 경우
