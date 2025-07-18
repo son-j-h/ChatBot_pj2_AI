@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from handlers import (
     certificate_handler,
+    leave_handler
 )  # attendance_handler, leave_handler도 같은 방식으로 준비
 
 app = Flask(__name__)
@@ -32,8 +33,8 @@ def answer():
         response_text = certificate_handler.answer(user_input)
     # elif topic == "attendance":
     #     response_text = attendance_handler.answer(user_input)
-    # elif topic == "leave":
-    #     response_text = leave_handler.answer(user_input)
+    elif topic == "leave":
+        response_text = leave_handler.answer(user_input)
     else:
         response_text = "🤖 이 질문은 아직 지원하지 않아요. 다시 질문해 주세요."
 
