@@ -5,15 +5,23 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import Chroma  
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
+import os 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # API 키는 .env에서 자동 로드되므로 여기선 생략, temperature=0(결과 재현성 높게)로 생성
 llm = ChatOpenAI(model_name="gpt-4o", temperature=0.05)  
 
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
+current_dir = os.path.dirname(__file__)
+base_dir = os.path.abspath(os.path.join(current_dir, ".."))
+
 # 1) 파일 경로 리스트
 paths = [
-    r"C:\Users\user\Downloads\ChatBot_pj2_AI-master\ChatBot_pj2_AI-master\utils\trainee_admin_attendance_guide.txt",
-    r"C:\Users\user\Downloads\ChatBot_pj2_AI-master\ChatBot_pj2_AI-master\utils\training_handbook.txt"
+    os.path.join(base_dir, "utils", "trainee_admin_attendance_guide.txt"),
+    os.path.join(base_dir, "utils", "training_handbook.txt")
 ]
 
 # 2) 텍스트 스플리터 설정
