@@ -28,7 +28,14 @@ tools = [
         name="LeaveHandler",
         func=leave_handler.answer,
         description="휴가, 조퇴, 병가, 공가 관련 질문에 대답합니다."
+    ),
+    # 추가해보겠습니다~~~
+    Tool(
+        name="AttendanceHandler",
+        func=attendance_handler.answer,
+        description="출결정정 관련 질문에 대답합니다."
     )
+    
 ]
 
 agent = initialize_agent(
