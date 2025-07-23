@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 import json # JSON 파싱을 위해 추가
 import datetime # 시간 정보 출력을 위해 추가
+import re
 
 from langchain.agents import initialize_agent, Tool
 from langchain.agents.agent_types import AgentType
@@ -14,6 +15,7 @@ from langchain.chains import LLMChain # LLM 체인 사용을 위해 추가
 # 핸들러 모듈들을 임포트합니다.
 # 실제 환경에서는 이 핸들러 파일들이 'handlers' 디렉토리 내에 존재해야 합니다.
 from handlers import certificate_handler, leave_handler, vacation_handler, attendance_handler, subsidy_handler
+from db_utils import get_student_info
 
 # .env 파일에서 환경 변수를 로드합니다.
 load_dotenv()
@@ -21,26 +23,16 @@ openai_key = os.getenv("OPENAI_API_KEY")
 
 # 1. 일반적인 정보성 질문에 답변할 LLM을 정의합니다. (기존 llm)
 # 이 LLM은 각 핸들러 내부에서 사용되거나, 라우터/통합 LLM이 없을 경우의 폴백으로 사용될 수 있습니다.
-llm = ChatOpenAI(
-    model_name="gpt-3.5-turbo",
-    temperature=0,
-    openai_api_key=openai_key
-)
+llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=openai_key)
 
 # 2. 사용자 질문을 분해하고 의도를 분류할 '라우터 LLM'을 정의합니다.
 # 이 LLM은 질문의 복잡성을 이해하고 여러 의도를 식별해야 하므로,
 # 가능하다면 gpt-4o, gpt-4-turbo 등 더 강력한 모델을 사용하는 것을 권장합니다.
-router_llm = ChatOpenAI(
-    model_name="gpt-3.5-turbo", # 테스트 목적으로 gpt-3.5-turbo 사용, 실제 서비스 시 gpt-4 계열 권장
-    temperature=0,
-    openai_api_key=openai_key
-)
+router_llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=openai_key)
 
 # 3. 개별 답변들을 종합하여 최종 답변을 생성할 '통합 LLM'을 정의합니다.
 synthesizer_llm = ChatOpenAI(
-    model_name="gpt-3.5-turbo", # 테스트 목적으로 gpt-3.5-turbo 사용, 실제 서비스 시 gpt-4 계열 권장
-    temperature=0.2, # 답변을 좀 더 유연하게 통합하기 위해 temperature를 약간 높일 수 있습니다.
-    openai_api_key=openai_key
+    model_name="gpt-4o", temperature=0.2, openai_api_key=openai_key
 )
 
 # 기존의 툴 정의는 그대로 유지합니다. 각 툴은 특정 도메인의 질문에 답변하는 역할을 합니다.
@@ -82,31 +74,94 @@ def log_progress(message: str):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
 
+# 각 세션 ID별로 학번, 학생 정보, 대화 상태를 저장
+session_data = {}
+STATE_INITIAL = "initial" # 챗봇 시작 및 학번 요청
+STATE_ID_PENDING = "id_pending" # 학번 입력 대기 중
+STATE_CONVERSATION_ACTIVE = "conversation_active" # 일반적인 대화 중
+
+def extract_student_id(user_input: str) -> str or None:
+    """
+    사용자 입력에서 학번 패턴을 추출합니다.
+    숫자만으로 이루어진 4자리 문자열을 학번으로 간주하는 정규 표현식.
+    """
+    match = re.search(r'\b(\d{4})\b', user_input)
+    if match:
+        return match.group(1)
+    return None
+
 @app.route("/answer", methods=["POST"])
 def answer():
-    """
-    사용자의 질문을 받아 다중 의도를 처리하고 통합된 답변을 반환하는 API 엔드포인트입니다.
-    """
-    log_progress("--- answer() 함수 진입 ---")
+    log_progress("--- answer() 함수 진입2222222222 ---")
     data = request.get_json()
     user_input = data.get("message", "").strip()
+    # 클라이언트에서 세션 ID를 'X-Session-ID' 헤더로 보내도록 가정
+    # 클라이언트(프론트엔드)에서는 고유한 세션 ID를 생성하여 요청마다 포함해야 합니다.
+    session_id = request.headers.get("X-Session-ID", "default_session")
+    
+    # 세션 데이터 초기화 또는 로드
+    current_session = session_data.setdefault(session_id, {
+        "state": STATE_INITIAL,
+        "student_id": None,
+        "student_info": None
+    })
 
-    # 사용자 입력이 비어있는 경우 오류 응답을 반환합니다.
+     # 사용자 입력이 비어있는 경우 오류 응답을 반환합니다.
     if not user_input:
-        log_progress("사용자 입력이 비어있습니다. 오류 응답 반환.")
-        return jsonify({"response": "질문을 입력해주세요."}), 400
+        if current_session["state"] == STATE_INITIAL:
+            # 첫 진입 시 메시지 반환 (클라이언트에서 빈 메시지로 호출한다고 가정)
+            current_session["state"] = STATE_ID_PENDING
+            log_progress(f"세션 {session_id}: 초기 상태. 학번 요청 메시지 반환.")
+            return jsonify({"response": "안녕하세요. 패캠 행정문의 챗봇 '우주🌌🧑‍🚀' 입니다. 학번을 말해주세요."})
+        else:
+            log_progress(f"세션 {session_id}: 사용자 입력이 비어있습니다. 오류 응답 반환.")
+            return jsonify({"response": "질문을 입력해주세요."}), 400
 
-    log_progress(f"사용자 입력: '{user_input}'")
+    log_progress(f"세션 {session_id} - 사용자 입력: '{user_input}', 현재 상태: {current_session['state']}")
 
+    # --------------------------------------------------------------------
+    # 학번 입력 대기 상태 처리
+    # --------------------------------------------------------------------
+    if current_session["state"] == STATE_ID_PENDING or current_session["student_id"] is None:
+        log_progress(f"세션 {session_id}: 학번 입력 대기 상태 또는 학번 미확인 상태.")
+        extracted_id = extract_student_id(user_input)
+
+        if extracted_id:
+            log_progress(f"세션 {session_id}: 입력에서 학번 '{extracted_id}' 추출됨.")
+            student_info = get_student_info(extracted_id)
+
+            if student_info:
+                student_name = student_info.get("STUDENT_NAME", "훈련생")
+                current_session["student_id"] = extracted_id
+                current_session["student_info"] = student_info
+                current_session["state"] = STATE_CONVERSATION_ACTIVE
+                log_progress(f"세션 {session_id}: 학번 '{extracted_id}' ({student_name}) 확인. 대화 상태로 전환.")
+                return jsonify({"response": f"{student_name}님, 어떤 것이 궁금하신가요?"})
+            else:
+                log_progress(f"세션 {session_id}: 학번 '{extracted_id}'로 학생 정보를 찾을 수 없음.")
+                return jsonify({"response": f"입력하신 학번({extracted_id})으로 학생 정보를 찾을 수 없습니다. 정확한 학번을 다시 알려주시겠어요?"})
+        else:
+            # 학번 입력 대기 중인데, 학번이 아닌 다른 질문을 했을 경우
+            log_progress(f"세션 {session_id}: 학번 대기 중인데, 학번 패턴을 찾을 수 없음.")
+            return jsonify({"response": "죄송합니다. 먼저 학번을 알려주세요. 학번은 4자리의 숫자로 입력해주세요."})
+    
+    
+    # --------------------------------------------------------------------
+    # 학번이 확인된 후 일반적인 대화 처리 (기존 answer 함수의 핵심 로직)
+    # --------------------------------------------------------------------
     try:
-        # --------------------------------------------------------------------
+        current_student_id = current_session["student_id"]
+        student_info = current_session["student_info"]
+
         # 1단계: 질문 분해 및 의도 분류 (Intent Classification)
-        # --------------------------------------------------------------------
         log_progress("1단계: 질문 분해 및 의도 분류 시작 (라우터 LLM 호출)")
         router_prompt_template = PromptTemplate(
             template="""
             당신은 사용자 질문을 분석하여 관련된 기능(tool)과 해당 기능에 전달할 질문을 분리하는 AI 비서입니다.
             아래에 정의된 tool들을 참고하여 사용자의 질문을 가장 적절하게 1개 이상의 tool과 sub_question으로 분리해주세요.
+            **만약 사용자의 질문에 특정 개인 정보를 요구하는 질문(예: '내 수료증 발급', '내 훈련 장려금', '내 휴가')이라면,
+            tool_name을 'RequireStudentID'로 설정하고 sub_question에 '학번이 필요합니다.'라고 명시해주세요.**
+            (현재 사용자의 학번이 {current_student_id}로 확인되었으므로, 'RequireStudentID'로 분류된 질문도 이 학번을 사용하여 처리할 수 있습니다.)
             만약 해당하는 tool이 없거나 질문의 의도를 명확히 알 수 없으면 tool_name을 'General'로 설정하고 sub_question에 원본 질문을 그대로 넣어주세요.
             결과는 반드시 JSON 형식의 배열로 반환해야 합니다.
 
@@ -116,12 +171,14 @@ def answer():
             - VacationHandler: {vacation_desc}
             - AttendanceHandler: {attendance_desc}
             - SubsidyHandler: {subsidy_desc}
+            - RequireStudentID: 특정 개인 정보 조회를 위해 학번이 필요한 경우. 예시: '내 훈련 장려금 알려줘', '내 휴가 신청해줘', '나의 수강증명서 발급받고 싶어.'
 
             사용자 질문: {user_input}
 
             JSON 형식 예시:
             [
               {{"tool_name": "CertificateHandler", "sub_question": "수료증 발급 어떻게 받나요?"}},
+              {{"tool_name": "RequireStudentID", "sub_question": "학번이 필요합니다."}},
               {{"tool_name": "VacationHandler", "sub_question": "병가 사용 규정이 어떻게 되나요?"}}
             ]
             """,
@@ -137,7 +194,8 @@ def answer():
             leave_desc=tools[1].description,
             vacation_desc=tools[2].description,
             attendance_desc=tools[3].description,
-            subsidy_desc=tools[4].description
+            subsidy_desc=tools[4].description,
+            current_student_id=current_student_id # 현재 학번을 프롬프트에 전달
         )
         log_progress(f"라우터 LLM 원본 응답: {raw_routing_output}")
 
@@ -174,6 +232,16 @@ def answer():
             if not tool_name or not sub_question:
                 log_progress(f"  경고: 유효하지 않은 의도 정보 스킵: {intent_info}")
                 continue
+            
+            # 'RequireStudentID'는 주로 챗봇이 사용자의 학번을 모르는 초기 단계에서 학번 입력을 유도하기 위한 의도입니다.
+            # 하지만 현재는 사용자의 학번(current_student_id)이 이미 세션에 성공적으로 확인된 상태입니다.
+            # 따라서 이 경우 학번을 다시 요청하는 것은 불필요하며, 대화 흐름을 방해할 수 있습니다.
+            # 대신, 학번이 이미 확인되었음을 사용자에게 알리고, 해당 'sub_question'에 대한 답변 처리를
+            # 계속 진행할 것임을 나타내는 메시지를 'individual_responses'에 추가합니다.
+            # 이 메시지는 최종 답변 통합 단계에서 다른 답변들과 함께 자연스럽게 연결될 것입니다.
+            if tool_name == "RequireStudentID":
+                individual_responses.append(f"학번({current_student_id})은 이미 확인되었습니다. '{sub_question}' 질문에 대한 답변을 준비합니다.")
+                continue
 
             if tool_name == "General":
                 # 'General' 의도는 특정 핸들러에 매핑되지 않는 질문입니다.
@@ -189,6 +257,11 @@ def answer():
                 log_progress(f"  '{tool_name}' 핸들러 호출 중...")
                 try:
                     # 해당 핸들러의 'func' (answer 함수)를 직접 호출합니다.
+                    tool_args = {
+                        "question": sub_question,
+                        "student_id": current_student_id,
+                        "student_info": student_info
+                    }
                     tool_response = target_tool.func(sub_question)
                     individual_responses.append(tool_response)
                     log_progress(f"  '{tool_name}' 핸들러 응답: '{tool_response}'")
