@@ -1,52 +1,54 @@
-# 휴가/조퇴/병가/공가 관련해서 대답할 수 있게끔 벡터DB 파일 수정
-
 from langchain.vectorstores import Chroma
 from langchain.embeddings import OpenAIEmbeddings
-from langchain.document_loaders import TextLoader
+from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 import os
 
+# 환경변수 로딩 (OpenAI 키)
 load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
 
-# OpenAI 임베딩 모델 사용
+# OpenAI 임베딩 모델 설정
 embedding_model = OpenAIEmbeddings(
     openai_api_key=openai_key,
     model="text-embedding-3-small"
 )
 
-# 벡터 DB가 저장될 폴더 생성
+# 벡터 DB 설정
 VECTOR_DIR = "../my_rag_db"
 COLLECTION_NAME = "admin_docs"
 
-doc_paths = [
-    "training_handbook.txt",
-    "attendance_guide.txt",
+# 파일 경로
+target_file = "training_handbook.txt"
+if not os.path.exists(target_file):
+    raise FileNotFoundError(f"❌ 파일 없음: {target_file}")
+
+# 전체 문서 읽기
+with open(target_file, encoding="utf-8") as f:
+    full_text = f.read()
+
+# 문단 단위로 분리하여 Document 객체 생성
+sections = full_text.split("\n\n")
+documents = [
+    Document(page_content=section.strip(), metadata={"source": target_file})
+    for section in sections if section.strip()
 ]
 
-# 벡터 DB화 시킬 문서가 존재하지 않을 경우
-all_documents = []
-for path in doc_paths:
-    if not os.path.exists(path):
-        print(f"❌ 파일 없음: {path}")
-        continue
-    loader = TextLoader(path, encoding="utf-8")
-    documents = loader.load()
-    all_documents.extend(documents)
+if not documents:
+    raise ValueError("📂 문서에서 유효한 섹션을 찾지 못했습니다.")
 
-if not all_documents:
-    raise ValueError("📂 임베딩할 문서를 찾을 수 없습니다.")
-
-# 청크화
+# 청크화: 문단 기준 + 토큰 기준
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
-split_docs = splitter.split_documents(all_documents)
+split_docs = splitter.split_documents(documents)
 
+# 벡터 DB 저장
 vectorstore = Chroma.from_documents(
     documents=split_docs,
     embedding=embedding_model,
     collection_name=COLLECTION_NAME,
     persist_directory=VECTOR_DIR
 )
+
 vectorstore.persist()
-print("✅ 문서 임베딩 완료 및 Chroma 저장")
+print("✅ 전체 문서 임베딩 및 Chroma 저장 완료")
