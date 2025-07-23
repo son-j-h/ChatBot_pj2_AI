@@ -18,38 +18,15 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 current_dir = os.path.dirname(__file__)
 base_dir = os.path.abspath(os.path.join(current_dir, ".."))
 
-# 1) 파일 경로 리스트
 paths = [
     os.path.join(base_dir, "utils", "trainee_admin_attendance_guide.txt"),
     os.path.join(base_dir, "utils", "training_handbook.txt")
 ]
 
-# 2) 텍스트 스플리터 설정
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1200,    # 한 덩어리 
-    chunk_overlap=300   # 덩어리 간 겹치기  
-)
-
-# 3) Document 객체 생성 (분할 후)
-docs: list[Document] = []
-for p in paths:
-    raw_text = open(p, encoding="utf-8").read()    # 원본 전체 텍스트 로드
-    chunks = text_splitter.split_text(raw_text)    # 문단/문장 기준으로 쪼개기
-
-    for idx, chunk in enumerate(chunks):
-        docs.append(Document(
-            page_content=chunk,
-            metadata={
-                "source_file": p,   # 원본 파일 경로
-                "chunk_index": idx  # 덩어리 번호
-            }
-        ))
-
 # 3) ChromaDB에 임베딩 + 업로드
 embeddings = OpenAIEmbeddings()  
-vector_db = Chroma(persist_directory="./attendance_db", embedding_function=embeddings)
-vector_db.add_documents(docs)  
-vector_db.persist()  # 디스크에 저장
+vector_db = Chroma(persist_directory="./my_rag_db", embedding_function=embeddings)
+
 
 
 # 3) 검색 함수 정의
@@ -78,8 +55,6 @@ def generate_answer(query: str, chunks: list[Document]) -> str:
         f"[{i+1}] (출처: {d.metadata['source_file']})\n{d.page_content}"
         for i, d in enumerate(chunks)
     )
-    # system 메시지: 봇의 톤·룰(“출처 표시 방식”·“못 찾으면 사과”) 정의
-    # user 메시지: 질문과 변환된 문서 조각 전달
     messages = [
         SystemMessage(content=(
             "당신은 패스트캠퍼스 수강생을 위한 행정 챗봇입니다. "
