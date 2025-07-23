@@ -10,8 +10,8 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # 벡터 DB 저장 위치 및 설정
-PERSIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../rag/vectorstore"))
-COLLECTION_NAME = "subsidy_docs"
+PERSIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../my_rag_db"))
+COLLECTION_NAME = "admin_docs"
 
 # ✅ 1. 벡터 DB 로딩만 수행 (생성 X)
 def load_vectorstore():
