@@ -22,12 +22,8 @@ paths = [
     os.path.join(base_dir, "utils", "trainee_admin_attendance_guide.txt"),
     os.path.join(base_dir, "utils", "training_handbook.txt")
 ]
-
-# 3) ChromaDB에 임베딩 + 업로드
-embeddings = OpenAIEmbeddings()  
+ 
 vector_db = Chroma(persist_directory="./my_rag_db", embedding_function=embeddings)
-
-
 
 # 3) 검색 함수 정의
 def retrieve_chunks(query: str, k: int = 5) -> list[Document]:
