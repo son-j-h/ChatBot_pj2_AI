@@ -8,33 +8,25 @@ import os
 load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
 
+embeddings = OpenAIEmbeddings()
 
 
-def load_text(filepath):
-    with open(filepath, "r", encoding="utf-8") as f:
-        return f.read()
-print("[DEBUG] 현재 경로:", os.getcwd())
-print("[DEBUG] 파일 존재?", os.path.isfile("utils/vacation_data.txt"))
-full_text = load_text("utils/vacation_data.txt")
-print("[DEBUG] full_text 길이:", len(full_text))
+vector_db = Chroma(
+    persist_directory="./my_rag_db", # 이 자리값 수정 해야함
+    embedding_function=embeddings
+)
 
 
+# def load_text(filepath):
+#     with open(filepath, "r", encoding="utf-8") as f:
+#         return f.read()
 
+# def load_few_shot_examples(filepath):
+#     with open(filepath, "r", encoding="utf-8") as f:
+#         return f.read()
 
-
-
-
-
-def load_text(filepath):
-    with open(filepath, "r", encoding="utf-8") as f:
-        return f.read()
-
-def load_few_shot_examples(filepath):
-    with open(filepath, "r", encoding="utf-8") as f:
-        return f.read()
-
-# txt에서 직접 원본 데이터 읽기
-full_text = load_text("utils/vacation_data.txt")   # 또는 "data/vacation_data.txt"
+# # txt에서 직접 원본 데이터 읽기
+# full_text = load_text("utils/vacation_data.txt")   # 또는 "data/vacation_data.txt"     # 얘도 벡터db 통합불러오기 하면서 필요없어짐
 
 CHUNK_SIZE = 300
 CHUNK_OVERLAP = 80
@@ -46,18 +38,18 @@ PROMPT_STYLE = ("공식적인 어조로, 반드시 존댓말로, 번호로 요�
 TEMPERATURE = 0.05
 MAX_TOKENS = 500
 
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=CHUNK_SIZE,
-    chunk_overlap=CHUNK_OVERLAP
-)
-chunks = splitter.split_text(full_text)
-docs = [Document(page_content=c, metadata={"idx": i}) for i, c in enumerate(chunks)]
-embeddings = OpenAIEmbeddings()
-vector_db = Chroma.from_documents(
-    docs,
-    embeddings,
-    persist_directory="./vacation_db_chunksize"
-)
+# splitter = RecursiveCharacterTextSplitter(
+#     chunk_size=CHUNK_SIZE,
+#     chunk_overlap=CHUNK_OVERLAP
+# )
+# chunks = splitter.split_text(full_text)
+# docs = [Document(page_content=c, metadata={"idx": i}) for i, c in enumerate(chunks)]
+# embeddings = OpenAIEmbeddings()
+# vector_db = Chroma.from_documents(
+#     docs,
+#     embeddings,
+#     persist_directory="./vacation_db_chunksize"      ## 벡터db 불러오기 1번만 하기 위해 삭제할 코드들 주석처리
+# )
 llm = OpenAI(temperature=TEMPERATURE, max_tokens=MAX_TOKENS)
 shot_examples = load_few_shot_examples("utils/vacation_shot.txt")
 
