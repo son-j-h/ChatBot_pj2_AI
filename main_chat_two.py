@@ -1,11 +1,11 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from utils.helpers import load_text
 from dotenv import load_dotenv
 import os
 import json  # JSON 파싱을 위해 추가
 import datetime  # 시간 정보 출력을 위해 추가
 import re
-import json
 import logging
 
 
@@ -26,6 +26,7 @@ from handlers import (
     subsidy_handler,
 )
 from db_utils import get_student_info
+
 
 # ✨ 실시간 벡터 메모리 활용을 위한 import
 from utils.chat_history import save_chat_to_vectorstore, retrieve_context
@@ -207,6 +208,11 @@ def answer():
     try:
         current_student_id = current_session["student_id"]
         student_info = current_session["student_info"]
+
+
+        # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
+        rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
+        rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
 
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
         rag_context_docs = retrieve_context(user_input, student_id=current_student_id)

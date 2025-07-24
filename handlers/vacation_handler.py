@@ -2,6 +2,7 @@ from langchain_openai import OpenAIEmbeddings, OpenAI
 from langchain_community.vectorstores import Chroma
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
+from utils.helpers import load_text ,load_few_shot_examples
 from dotenv import load_dotenv
 import os
 
