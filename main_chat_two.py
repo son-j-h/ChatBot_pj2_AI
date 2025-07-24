@@ -20,9 +20,12 @@ from langchain_core.prompts import PromptTemplate
 # 실제 환경에서는 이 핸들러 파일들이 'handlers' 디렉토리 내에 존재해야 합니다.
 from handlers import certificate_handler, leave_handler, vacation_handler, attendance_handler, subsidy_handler
 from db_utils import get_student_info
+<<<<<<< HEAD
+=======
 
 # ✨ 실시간 벡터 메모리 활용을 위한 import
 from utils.chat_history import save_chat_to_vectorstore, retrieve_context
+>>>>>>> upstream/master
 
 # .env 파일에서 환경 변수를 로드합니다.
 load_dotenv()
@@ -169,10 +172,13 @@ def answer():
     try:
         current_student_id = current_session["student_id"]
         student_info = current_session["student_info"]
+<<<<<<< HEAD
+=======
         
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
         rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
         rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
+>>>>>>> upstream/master
 
         # 1단계: 질문 분해 및 의도 분류 (Intent Classification)
         log_progress("1단계: 질문 분해 및 의도 분류 시작 (라우터 LLM 호출)")
