@@ -21,6 +21,9 @@ from langchain_core.prompts import PromptTemplate
 from handlers import certificate_handler, leave_handler, vacation_handler, attendance_handler, subsidy_handler
 from db_utils import get_student_info
 
+# ✨ 실시간 벡터 메모리 활용을 위한 import
+from utils.chat_history import save_chat_to_vectorstore, retrieve_context
+
 # .env 파일에서 환경 변수를 로드합니다.
 load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
@@ -166,6 +169,10 @@ def answer():
     try:
         current_student_id = current_session["student_id"]
         student_info = current_session["student_info"]
+        
+        # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
+        rag_context_docs = retrieve_context(user_input, user_id=current_student_id)
+        rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
 
         # 1단계: 질문 분해 및 의도 분류 (Intent Classification)
         log_progress("1단계: 질문 분해 및 의도 분류 시작 (라우터 LLM 호출)")
@@ -310,19 +317,23 @@ def answer():
             final_response = "죄송합니다. 질문을 이해하지 못했습니다. 더 자세히 알려주시겠어요?"
             log_progress("처리된 답변이 없어 기본 폴백 응답을 사용합니다.")
         else:
-            # 통합 LLM을 사용하여 개별 답변들을 자연스럽게 연결하고 통합합니다.
+            # 🔄 기존 통합 프롬프트를 RAG context 포함 버전으로 교체
             synthesis_prompt_template = PromptTemplate(
                 template="""
-                다음은 사용자의 여러 질문에 대한 개별적인 답변들입니다. 이 답변들을 조합하여 하나의 자연스럽고 유려한 한국어 문장으로 만들어주세요.
-                각 답변의 내용이 명확하게 드러나도록 하고, 필요한 경우 연결어를 사용하여 부드럽게 이어주세요.
+                다음은 사용자의 여러 질문에 대한 개별적인 답변들입니다.
+                사용자의 최근 대화 문맥도 아래에 포함되어 있습니다.
+                대화 문맥을 참고하여 답변들이 자연스럽게 이어지도록 유려하게 하나의 한국어 문장으로 만들어주세요.
                 존댓말을 사용해주세요.
+
+                최근 대화 문맥:
+                {rag_context}
 
                 개별 답변들:
                 {individual_responses_str}
 
                 최종 답변:
                 """,
-                input_variables=["individual_responses_str"]
+                input_variables=["rag_context", "individual_responses_str"]
             )
             synthesizer_chain = LLMChain(llm=synthesizer_llm, prompt=synthesis_prompt_template)
 
@@ -332,8 +343,15 @@ def answer():
                 individual_responses_str = "- " + individual_responses_str
             
             log_progress(f"통합 LLM에 전달할 개별 답변 문자열: \n{individual_responses_str}")
-            final_response = synthesizer_chain.run(individual_responses_str=individual_responses_str)
+            final_response = synthesizer_chain.run(
+                rag_context=rag_context,
+                individual_responses_str=individual_responses_str
+            )
             log_progress(f"통합 LLM 최종 응답: {final_response}")
+            
+        # ✨ 실시간 대화 저장
+        save_chat_to_vectorstore(user_input, final_response, user_id=current_student_id)
+        log_progress("실시간 대화 저장 완료.")
 
         # 최종 답변을 한국어로만 제공하도록 보장합니다. (통합 LLM이 이미 한국어로 생성하므로 중복될 수 있습니다.)
         # final_response = f"모든 답변은 한국어로 제공됩니다. {final_response.strip()}"
