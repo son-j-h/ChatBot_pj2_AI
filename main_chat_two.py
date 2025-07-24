@@ -5,12 +5,16 @@ import os
 import json # JSON 파싱을 위해 추가
 import datetime # 시간 정보 출력을 위해 추가
 import re
+import json
+import logging
+
 
 from langchain.agents import initialize_agent, Tool
 from langchain.agents.agent_types import AgentType
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate # 프롬프트 템플릿 사용을 위해 추가
 from langchain.chains import LLMChain # LLM 체인 사용을 위해 추가
+from langchain_core.prompts import PromptTemplate
 
 # 핸들러 모듈들을 임포트합니다.
 # 실제 환경에서는 이 핸들러 파일들이 'handlers' 디렉토리 내에 존재해야 합니다.
@@ -85,14 +89,24 @@ def extract_student_id(user_input: str) -> str or None:
     사용자 입력에서 학번 패턴을 추출합니다.
     숫자만으로 이루어진 4자리 문자열을 학번으로 간주하는 정규 표현식.
     """
-    match = re.search(r'\b(\d{4})\b', user_input)
+    match = re.search(r'(?:학번은?|학번)\s*(\d{4})', user_input)
     if match:
+        print(f"DEBUG: 학번 추출 성공 (키워드 기반): '{match.group(1)}' from '{user_input}'")
         return match.group(1)
+    
+    # 키워드 없이 단순히 숫자만 입력했을 경우도 고려하여 fallback
+    # 단어 경계가 없는 숫자 패턴을 찾습니다.
+    match_fallback = re.search(r'(\d{4})', user_input)
+    if match_fallback:
+        print(f"DEBUG: 학번 추출 성공 (숫자만): '{match_fallback.group(1)}' from '{user_input}'")
+        return match_fallback.group(1)
+        
+    print(f"DEBUG: 학번 추출 실패: '{user_input}'에서 학번 패턴을 찾을 수 없음.")
     return None
 
 @app.route("/answer", methods=["POST"])
 def answer():
-    log_progress("--- answer() 함수 진입2222222222 ---")
+    log_progress("--- answer() 함수 진입 ---")
     data = request.get_json()
     user_input = data.get("message", "").strip()
     # 클라이언트에서 세션 ID를 'X-Session-ID' 헤더로 보내도록 가정
@@ -198,17 +212,28 @@ def answer():
             current_student_id=current_student_id # 현재 학번을 프롬프트에 전달
         )
         log_progress(f"라우터 LLM 원본 응답: {raw_routing_output}")
+        
+        # --- 이 부분이 중요합니다. JSON 파싱 전에 전처리! ---
+        processed_router_llm_output = raw_routing_output.strip()
+
+        # 만약 응답이 ```json 으로 시작하고 ``` 로 끝난다면 제거
+        if processed_router_llm_output.startswith("```json") and \
+        processed_router_llm_output.endswith("```"):
+            # ```json 와 ``` 를 제거하고, 내부의 줄바꿈과 공백을 정리 (strip)
+            processed_router_llm_output = processed_router_llm_output[len("```json"): -len("```")].strip()
+            log_progress(f"DEBUG: 백틱 제거 후 전처리된 LLM 응답: {processed_router_llm_output}")
+        # --- 수정 끝 ---
 
         parsed_intents = []
         try:
             # LLM 응답을 JSON으로 파싱합니다.
-            parsed_intents = json.loads(raw_routing_output)
+            parsed_intents = json.loads(processed_router_llm_output)
             # LLM이 때때로 단일 객체를 반환할 수 있으므로, 리스트가 아니면 리스트로 감쌉니다.
             if not isinstance(parsed_intents, list):
                 parsed_intents = [parsed_intents]
             log_progress(f"파싱된 의도: {parsed_intents}")
         except json.JSONDecodeError:
-            log_progress(f"❌ 라우터 LLM 출력 JSON 파싱 실패: {raw_routing_output}. 전체 질문을 'General' 의도로 처리합니다.")
+            log_progress(f"❌ 라우터 LLM 출력 JSON 파싱 실패: {processed_router_llm_output}. 전체 질문을 'General' 의도로 처리합니다.")
             # JSON 파싱 실패 시, 전체 질문을 'General' 의도로 처리하는 폴백 로직
             parsed_intents = [{"tool_name": "General", "sub_question": user_input}]
         
