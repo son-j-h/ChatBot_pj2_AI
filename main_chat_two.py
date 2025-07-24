@@ -171,7 +171,7 @@ def answer():
         student_info = current_session["student_info"]
         
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
-        rag_context_docs = retrieve_context(user_input, user_id=current_student_id)
+        rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
         rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
 
         # 1단계: 질문 분해 및 의도 분류 (Intent Classification)
@@ -350,7 +350,7 @@ def answer():
             log_progress(f"통합 LLM 최종 응답: {final_response}")
             
         # ✨ 실시간 대화 저장
-        save_chat_to_vectorstore(user_input, final_response, user_id=current_student_id)
+        save_chat_to_vectorstore(user_input, final_response, student_id=current_student_id)
         log_progress("실시간 대화 저장 완료.")
 
         # 최종 답변을 한국어로만 제공하도록 보장합니다. (통합 LLM이 이미 한국어로 생성하므로 중복될 수 있습니다.)

@@ -30,14 +30,14 @@ vectorstore = Chroma(
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 
 # 🟢 실시간 대화 저장 함수
-def save_chat_to_vectorstore(user_input, bot_response, user_id="default"):
+def save_chat_to_vectorstore(user_input, bot_response, student_id="default"):
     chat = f"User: {user_input}\nBot: {bot_response}"
-    doc = Document(page_content=chat, metadata={"source": "chat", "user_id": user_id})
+    doc = Document(page_content=chat, metadata={"source": "chat", "student_id": student_id})
     chunks = splitter.split_documents([doc])
     vectorstore.add_documents(chunks)
 
 # 🔍 쿼리 유사 검색 함수
-def retrieve_context(query, k=3, user_id=None):
-    if user_id:
-        return vectorstore.similarity_search(query, k=k, filter={"user_id": user_id})
+def retrieve_context(query, k=3, student_id=None):
+    if student_id:
+        return vectorstore.similarity_search(query, k=k, filter={"student_id": student_id})
     return vectorstore.similarity_search(query, k=k)
