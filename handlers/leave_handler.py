@@ -27,7 +27,7 @@ llm = ChatOpenAI(
 
 # ✅ 벡터스토어 (RAG)
 VECTOR_DIR = "./my_rag_db"
-COLLECTION_NAME = "admin_docs"
+COLLECTION_NAME = "leave_docs"
 vectorstore = Chroma(
     collection_name=COLLECTION_NAME,
     persist_directory=VECTOR_DIR,
@@ -105,11 +105,11 @@ def insert_attendance_request(
         db_port = int(os.getenv("DB_PORT", 3306))  # ✅ 포트 환경변수 처리
 
         conn = pymysql.connect(
-            host=os.getenv("DB_HOST", "localhost"),
+            host=os.getenv("MYSQL_HOST", "localhost"),
             port=db_port,
-            user=os.getenv("DB_USER", "user"),
-            password=os.getenv("DB_PASSWORD", "password"),
-            db=os.getenv("DB_NAME", "bootcamp"),
+            user=os.getenv("MYSQL_USER", "user"),
+            password=os.getenv("MYSQL_PASSWORD", "password"),
+            db=os.getenv("MYSQL_DB", "bootcamp"),
             charset="utf8mb4",
             autocommit=True
         )
