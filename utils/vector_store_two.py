@@ -19,8 +19,13 @@ embedding_model = OpenAIEmbeddings(
 VECTOR_DIR = "../my_rag_db"
 COLLECTION_NAME = "admin_docs"
 
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+print("▶ BASE_DIR:", BASE_DIR)
+print("▶ BASE_DIR contents:", os.listdir(BASE_DIR))
+
 # 파일 경로
-target_file = "training_handbook.txt"
+target_file = os.path.join(BASE_DIR,"training_handbook.txt")
+#target_file = "training_handbook.txt"
 if not os.path.exists(target_file):
     raise FileNotFoundError(f"❌ 파일 없음: {target_file}")
 

@@ -46,7 +46,7 @@ router_llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=opena
 
 # 3. 개별 답변들을 종합하여 최종 답변을 생성할 '통합 LLM'을 정의합니다.
 synthesizer_llm = ChatOpenAI(
-    model_name="gpt-4o", temperature=0.2, openai_api_key=openai_key
+    model_name="gpt-4o", temperature=0.05, openai_api_key=openai_key
 )
 
 # 기존의 툴 정의는 그대로 유지합니다. 각 툴은 특정 도메인의 질문에 답변하는 역할을 합니다.
@@ -64,7 +64,7 @@ tools = [
     Tool(
         name="VacationHandler",
         func=vacation_handler.answer,
-        description="개인 휴가, 예비군/병가/면접 등 기타 공가의 *종류, 사용 규정, 신청 절차, 관련 서류, 사용 일수 등 일반적인 정보나 절차에 대한 문의*에 답변합니다. 사용자가 휴가/조퇴/병가를 직접 신청하겠다고 요청하는 질문은 LeaveHandler에서 처리합니다. 예시: '병가 사용 규정이 어떻게 되나요?', '개인 휴가 일수는 얼마나 되나요?', '예비군 공가는 어떻게 신청하나요?', '공가 신청 시 어떤 서류가 필요한가요?'",
+        description="개인 휴가, 예비군/병가/면접 등 기타 공가의 *종류, 사용 규정, 신청 절차, 관련 서류, 사용 일수 등 일반적인 정보나 절차에 대한 문의*에 답변합니다. 사용자가 휴가/조퇴/병가를 직접 신청하겠다고 요청하는 질문은 LeaveHandler에서 처리합니다. 예시: '병가 사용 규정이 어떻게 되나요?', '개인 휴가 일수는 얼마나 되나요?', '예비군 공가는 어떻게 신청하나요?', '공가 신청 시 어떤 서류가 필요한가요?', '출석 인정 사유에는 어떤 것들이 있어?'",
     ),
     Tool(
         name="AttendanceHandler",
@@ -257,7 +257,7 @@ def answer():
             ],
         )
 
-        router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template)
+        router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template, verbose=True)
 
         # 라우터 LLM을 호출하여 의도 분류 결과를 받습니다.
         raw_routing_output = router_chain.run(

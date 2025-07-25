@@ -1,7 +1,7 @@
 from langchain_openai import OpenAIEmbeddings, OpenAI
 from langchain_community.vectorstores import Chroma
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.schema import Document
+# from langchain.text_splitter import RecursiveCharacterTextSplitter
+# from langchain.schema import Document
 from utils.helpers import load_text ,load_few_shot_examples
 from dotenv import load_dotenv
 import os
@@ -29,13 +29,15 @@ vector_db = Chroma(
 # # txt에서 직접 원본 데이터 읽기
 # full_text = load_text("utils/vacation_data.txt")   # 또는 "data/vacation_data.txt"     # 얘도 벡터db 통합불러오기 하면서 필요없어짐
 
-CHUNK_SIZE = 300
-CHUNK_OVERLAP = 80
+# CHUNK_SIZE = 300
+# CHUNK_OVERLAP = 80      
 SEARCH_K = 3
-PROMPT_STYLE = ("공식적인 어조로, 반드시 존댓말로, 번호로 요약해 답변하라. "
-    "※ 단, '존댓말로 하라', '번호로 요약하라' 등 이 지침 문구를 답변에 직접 적지 마세요."
-    "'사용자 질문'에만 집중해서 답변하라. 이전 대화 내용은 참고만 하고, 현재 질문에 맞지 않는 정보는 절대 포함하지마라"
-)
+PROMPT_STYLE = """[지침]
+1.아래[참고 데이터]에 명시된 내용만 사용해라 불확실한 정보는 절대 생성하지 말고, 모를 땐 '해당 정보가 없습니다' 라고 답변해라
+2.공식적인 어조로, 반드시 존댓말로, 번호로 요약해 답변하라. 
+3. ※ 단, '존댓말로 하라', '번호로 요약하라' 등 이 지침 문구를 답변에 직접 적지 마세요.
+4. '사용자 질문'에만 집중해서 답변하라. 이전 대화 내용은 참고만 하고, 현재 질문에 맞지 않는 정보는 절대 포함하지마라
+"""
 TEMPERATURE = 0.05
 MAX_TOKENS = 500
 
