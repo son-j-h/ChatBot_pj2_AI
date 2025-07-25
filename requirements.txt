@@ -1,0 +1,23 @@
+# Flask 웹서버
+flask
+flask-cors
+python-dotenv
+
+# LangChain + 벡터 저장소
+langchain-core
+langchain-community
+langchain-openai
+langchain-text-splitters
+langchain-chroma
+
+# 필수 유틸
+openai
+tiktoken
+pydantic
+pymysql
+mysql-connector-python
+typing-extensions
+requests
+
+# Chroma 벡터 스토어
+chromadb
