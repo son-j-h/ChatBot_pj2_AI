@@ -15,6 +15,8 @@ from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate  # 프롬프트 템플릿 사용을 위해 추가
 from langchain.chains import LLMChain  # LLM 체인 사용을 위해 추가
 from langchain_core.prompts import PromptTemplate
+from langchain_core.messages import SystemMessage, HumanMessage
+
 
 # 핸들러 모듈들을 임포트합니다.
 # 실제 환경에서는 이 핸들러 파일들이 'handlers' 디렉토리 내에 존재해야 합니다.
@@ -81,6 +83,22 @@ tools = [
 # Flask 애플리케이션을 초기화하고 CORS를 설정합니다.
 app = Flask(__name__)
 CORS(app)
+
+# 욕설 필터링 함수 
+def is_profanity(text: str) -> bool:
+    """
+    입력된 텍스트가 욕설이나 부적잘한 표현인지 여부를 판단합니다.
+    LLM을 활용한 필터링 방식입니다. 결과는 '예' 또는 '아니오'로 표시됩니다.
+    """
+    system_prompt = "당신은 입력된 문장이 욕설 또는 부적절한 언어인지 판단하는 AI입니다."
+    question = f"문장: '{text}' -> 욕설인가요? 예/아니오로 대답하세요."
+
+    result = llm([
+       SystemMessage(content=system_prompt),
+       HumanMessage(content=question),
+    ])
+
+    return "예" in result.content
 
 
 # 로깅을 위한 헬퍼 함수
@@ -157,6 +175,11 @@ def answer():
         f"세션 {session_id} - 사용자 입력: '{user_input}', 현재 상태: {current_session['state']}"
     )
 
+    # ✅ 욕설 필터링 ①
+    if is_profanity(user_input):
+        log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
+        return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
+
     # --------------------------------------------------------------------
     # 학번 입력 대기 상태 처리
     # --------------------------------------------------------------------
@@ -208,6 +231,11 @@ def answer():
     try:
         current_student_id = current_session["student_id"]
         student_info = current_session["student_info"]
+
+        # ✅ 욕설 필터링 ①
+        if is_profanity(user_input):
+            log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
+            return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
 
 
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
