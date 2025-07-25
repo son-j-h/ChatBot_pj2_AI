@@ -1,43 +1,56 @@
 from langchain.vectorstores import Chroma
 from langchain.embeddings import OpenAIEmbeddings
 from langchain.schema import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 import os
 
-# 환경 변수 로딩
 load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
 
-# 임베딩 모델
+# ✅ 1. OpenAI 임베딩 모델 설정
 embedding_model = OpenAIEmbeddings(
     openai_api_key=openai_key,
     model="text-embedding-3-small"
 )
 
-# 벡터 DB 경로와 컬렉션
-VECTOR_DIR = "../my_rag_db"
-COLLECTION_NAME = "chat_history"
-
-# 벡터 DB 불러오기
-vectorstore = Chroma(
-    collection_name=COLLECTION_NAME,
-    persist_directory=VECTOR_DIR,
+# ✅ 2. 문서 기반 RAG 벡터 DB (읽기 전용)
+rag_vectordb = Chroma(
+    persist_directory="../my_rag_db",   # 벡터 DB 경로 주의!
+    collection_name="admin_docs",
     embedding_function=embedding_model
 )
 
-# 청크 분할기
-splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
+# ✅ 3. 실시간 대화 저장용 벡터 DB (쓰기 전용)
+memory_vectordb = Chroma(
+    persist_directory="memory_db",      # 별도 저장소
+    collection_name="chat_history",
+    embedding_function=embedding_model
+)
 
-# 🟢 실시간 대화 저장 함수
-def save_chat_to_vectorstore(user_input, bot_response, student_id="default"):
-    chat = f"User: {user_input}\nBot: {bot_response}"
-    doc = Document(page_content=chat, metadata={"source": "chat", "student_id": student_id})
-    chunks = splitter.split_documents([doc])
-    vectorstore.add_documents(chunks)
+def retrieve_context(user_input, student_id=None):
+    """
+    ✅ 문서 기반 RAG DB에서 유사한 문서를 검색합니다.
+    실시간 대화 벡터는 사용하지 않음.
+    """
+    try:
+        results = rag_vectordb.similarity_search_with_score(user_input, k=3)
+        return [doc for doc, score in results if score > 0.8]
+    except Exception as e:
+        print(f"❌ RAG 검색 오류: {e}")
+        return []
 
-# 🔍 쿼리 유사 검색 함수
-def retrieve_context(query, k=3, student_id=None):
-    if student_id:
-        return vectorstore.similarity_search(query, k=k, filter={"student_id": student_id})
-    return vectorstore.similarity_search(query, k=k)
+def save_chat_to_vectorstore(user_input, response, student_id=None):
+    """
+    ✨ 실시간 대화 내용을 벡터화하여 저장합니다.
+    검색에는 사용하지 않음.
+    """
+    try:
+        content = f"User: {user_input}\nAssistant: {response}"
+        metadata = {"student_id": student_id} if student_id else {}
+        doc = Document(page_content=content, metadata=metadata)
+
+        memory_vectordb.add_documents([doc])
+        memory_vectordb.persist()
+        print("✅ 실시간 대화 저장 완료")
+    except Exception as e:
+        print(f"❌ 대화 저장 실패: {e}")
