@@ -75,8 +75,8 @@ def extract_leave_info(user_input: str) -> dict:
 {{
   "start_date": "2025-08-01",
   "end_date": "2025-08-01",
-  "start_time": "14:00",   # 시간 정보는 조퇴일 경우만 사용, 없으면 null
-  "end_time": "18:00",     # 시간 정보는 조퇴일 경우만 사용, 없으면 null
+  "start_time": "14:00",
+  "end_time": "18:00",
   "reason": "두통 때문에 병원 방문",
   "type_big": "조퇴",
   "type_small": "두통"
@@ -117,7 +117,7 @@ def insert_attendance_request(
     reason: str
 ) -> bool:
     try:
-        db_port = int(os.getenv("MYSQL_PORT", 3306))  # ✅ 포트 환경변수 처리
+        db_port = int(os.getenv("MYSQL_PORT", 3306))
 
         conn = pymysql.connect(
             host=os.getenv("MYSQL_HOST", "localhost"),
@@ -143,87 +143,106 @@ def insert_attendance_request(
         print(f"[❌ DB insert 오류]: {e}")
         return False
 
-def detect_leave_type(text: str) -> str:
-    text = text.lower()
-    if "병가" in text:
-        return "병가"
-    elif "공가" in text:
-        return "공가"
-    elif "조퇴" in text:
-        return "조퇴"
-    else:
-        return "휴가"  # 기본값
+# ✅ DB 조회
+def get_attendance_records(student_id: int) -> list:
+    try:
+        db_port = int(os.getenv("MYSQL_PORT", 3306))
+
+        conn = pymysql.connect(
+            host=os.getenv("MYSQL_HOST", "localhost"),
+            port=db_port,
+            user=os.getenv("MYSQL_USER", "user"),
+            password=os.getenv("MYSQL_PASSWORD", "password"),
+            db=os.getenv("MYSQL_DB", "bootcamp"),
+            charset="utf8mb4"
+        )
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            sql = """
+                SELECT * FROM ATTENDANCE_REQUESTS
+                WHERE STUDENT_ID = %s
+                ORDER BY REQUEST_AT DESC
+                LIMIT 10
+            """
+            cursor.execute(sql, (student_id,))
+            result = cursor.fetchall()
+        conn.close()
+        return result
+    except Exception as e:
+        print(f"[❌ DB 조회 오류]: {e}")
+        return []
 
 # ✅ 메인 응답 함수
 def answer(user_input: str, student_id: int = None, student_info: dict = None) -> str:
-    """
-    휴가/조퇴/병가 신청을 처리하는 메인 함수
-    
-    Args:
-        user_input (str): 사용자 입력 텍스트
-        student_id (int): 학생 ID (main_chat_two.py에서 전달받음)
-        student_info (dict): 학생 정보 딕셔너리 (필요시 사용)
-    
-    Returns:
-        str: 처리 결과 메시지
-    """
     if not user_input.strip():
         return "질문을 입력해주세요."
 
-    # student_id가 전달되지 않은 경우 기본값 사용 (하위 호환성)
     if student_id is None:
         student_id = 1
-        print(f"⚠️ [경고] student_id가 전달되지 않아 기본값({student_id}) 사용")
 
     try:
+        # 🔍 조회 여부 확인
+        if any(keyword in user_input for keyword in ["내역", "조회", "신청한", "상태"]):
+            print("🔎 [조회 의도 판단됨]")
+            records = get_attendance_records(student_id)
+
+            # 휴가/조퇴/병가/공가 필터링
+            filter_type = None
+            for t in ["휴가", "병가", "공가", "조퇴"]:
+                if t in user_input:
+                    filter_type = t
+                    break
+            if filter_type:
+                records = [r for r in records if r["TYPE_BIG"] == filter_type]
+
+            if not records:
+                return "최근 신청 내역이 없습니다."
+
+            response = "📋 최근 신청 내역\n"
+            for i, r in enumerate(records, 1):
+                start = r["START_DATETIME"]
+                end = r["END_DATETIME"]
+                response += f"\n🔹 신청 {i}번\n  📅 기간: {start} ~ {end}\n  📝 사유: {r['REASON']}\n  📌 유형: {r['TYPE_BIG']} / {r['TYPE_SMALL']}\n  📊 상태: {r['STATUS']}\n"
+            return response.strip()
+
+        # ✏️ 신청 의도
         if is_leave_intent(user_input):
             print("🧭 [휴가 신청 의도 판단됨 → LLM 파싱 시도]")
             info = extract_leave_info(user_input)
             start = info.get("start_date")
             end = info.get("end_date")
             reason = info.get("reason")
+            type_big = info.get("type_big") or "휴가"
+            type_small = info.get("type_small") or "기타"
 
             if not (start and end and reason):
                 return (
-                    "휴가 또는 조퇴를 신청하시려는 것 같네요!\n"
-                    "📅 언제부터 언제까지 쉬실 예정인가요?\n"
+                    f"{type_big}를 신청하시려는 것 같네요!\n"
+                    "📅 언제부터 언제까지 예정인가요?\n"
                     "📝 그리고 사유도 함께 알려주세요!"
                 )
 
-            # 🔄 수정: main_chat_two.py에서 받은 student_id 사용
             success = insert_attendance_request(
-                student_id=student_id,  # 전달받은 student_id 사용
-                type_big="휴가",
-                type_small="기타",
+                student_id=student_id,
+                type_big=type_big,
+                type_small=type_small,
                 start_dt=start,
                 end_dt=end,
                 reason=reason
             )
 
             if success:
-                # student_info가 있다면 학생 이름 사용
-                student_name = "훈련생"
-                if student_info and "STUDENT_NAME" in student_info:
-                    student_name = student_info["STUDENT_NAME"]
-                
                 return (
-                    f"✅ {student_name}님의 휴가 신청이 정상적으로 접수되었습니다!\n"
+                    f"✅ {type_big} 신청이 정상적으로 접수되었습니다!\n"
                     f"⏰ 기간: {start} ~ {end}\n"
                     f"📝 사유: {reason}\n"
                     f"승인까지 잠시 기다려주세요."
                 )
             else:
-                return "❌ 휴가 신청 처리 중 오류가 발생했습니다. 다시 시도해주세요."
+                return "❌ 신청 처리 중 오류가 발생했습니다. 다시 시도해주세요."
 
-        # 일반 정보 질의 → RAG
+        # ❓ 일반 질문 → RAG
         print("🔍 [일반 정보 질의 → 문서 검색 시작]")
         result = qa_chain(user_input)
-
-        source_docs = result["source_documents"]
-        print(f"\n📚 [참고한 문서 수]: {len(source_docs)}")
-        for i, doc in enumerate(source_docs):
-            print(f"\n📄 문서 {i+1}:\n{doc.page_content[:300]}")
-
         return str(result["result"])
 
     except Exception as e:
