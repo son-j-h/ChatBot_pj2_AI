@@ -155,8 +155,6 @@ def detect_leave_type(text: str) -> str:
         return "휴가"  # 기본값
 
 # ✅ 메인 응답 함수
-# leave_handler.py - 수정된 메인 응답 함수
-
 def answer(user_input: str, student_id: int = None, student_info: dict = None) -> str:
     """
     휴가/조퇴/병가 신청을 처리하는 메인 함수

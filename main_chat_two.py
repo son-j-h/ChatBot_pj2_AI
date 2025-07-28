@@ -376,9 +376,6 @@ def answer():
             # tools 리스트에서 해당하는 Tool 객체를 찾습니다.
             target_tool = next((t for t in tools if t.name == tool_name), None)
 
-            # main_chat_two.py에서 핸들러 호출 부분을 다음과 같이 수정하세요:
-            # (약 320번째 줄 근처, target_tool 처리 부분)
-
             if target_tool:
                 log_progress(f"  '{tool_name}' 핸들러 호출 중...")
                 try:
