@@ -238,7 +238,6 @@ def answer():
             log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
             return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
 
-
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
         rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
         rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
@@ -395,20 +394,26 @@ def answer():
             if target_tool:
                 log_progress(f"  '{tool_name}' 핸들러 호출 중...")
                 try:
-                    # 해당 핸들러의 'func' (answer 함수)를 직접 호출합니다.
-                    tool_args = {
-                        "question": sub_question,
-                        "student_id": current_student_id,
-                        "student_info": student_info,
-                    }
-                    tool_response = target_tool.func(sub_question)
+                    # 🔄 수정: 먼저 새로운 방식으로 시도, 실패하면 기존 방식으로 fallback
+                    try:
+                        # 새로운 방식: student_id와 student_info 전달
+                        tool_response = target_tool.func(
+                            sub_question, 
+                            student_id=current_student_id, 
+                            student_info=student_info
+                        )
+                        log_progress(f"  '{tool_name}' 핸들러: 새로운 방식으로 호출 성공")
+                    except TypeError as te:
+                        # 매개변수 오류 발생 시 기존 방식으로 호출
+                        log_progress(f"  '{tool_name}' 핸들러: 기존 방식으로 fallback 호출 - {te}")
+                        tool_response = target_tool.func(sub_question)
+                    
                     individual_responses.append(tool_response)
                     log_progress(f"  '{tool_name}' 핸들러 응답: '{tool_response}'")
+                    
                 except Exception as tool_e:
                     log_progress(f"  [❌ {tool_name} 핸들러 오류]: {tool_e}")
-                    individual_responses.append(
-                        f"'{sub_question}' 질문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-                    )
+                    individual_responses.append(f"'{sub_question}' 질문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
             else:
                 # 라우터 LLM이 존재하지 않는 툴 이름을 반환한 경우
                 error_msg = f"'{sub_question}' 질문에 해당하는 처리기({tool_name})를 찾을 수 없습니다."
@@ -419,6 +424,7 @@ def answer():
             f"모든 개별 핸들러 실행 완료. 수집된 개별 답변: {individual_responses}"
         )
         intermediate_messages.append("수집된 정보를 통합하여 답변을 정리하고 있어요...") # 답변 통합 시작 메시지
+
 
         # --------------------------------------------------------------------
         # 3단계: 답변 통합 (Response Synthesis)
