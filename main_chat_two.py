@@ -237,7 +237,6 @@ def answer():
             log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
             return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
 
-
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
         rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
         rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
@@ -377,18 +376,29 @@ def answer():
             # tools 리스트에서 해당하는 Tool 객체를 찾습니다.
             target_tool = next((t for t in tools if t.name == tool_name), None)
 
+            # main_chat_two.py에서 핸들러 호출 부분을 다음과 같이 수정하세요:
+            # (약 320번째 줄 근처, target_tool 처리 부분)
+
             if target_tool:
                 log_progress(f"  '{tool_name}' 핸들러 호출 중...")
                 try:
-                    # 해당 핸들러의 'func' (answer 함수)를 직접 호출합니다.
-                    tool_args = {
-                        "question": sub_question,
-                        "student_id": current_student_id,
-                        "student_info": student_info
-                    }
-                    tool_response = target_tool.func(sub_question)
+                    # 🔄 수정: 먼저 새로운 방식으로 시도, 실패하면 기존 방식으로 fallback
+                    try:
+                        # 새로운 방식: student_id와 student_info 전달
+                        tool_response = target_tool.func(
+                            sub_question, 
+                            student_id=current_student_id, 
+                            student_info=student_info
+                        )
+                        log_progress(f"  '{tool_name}' 핸들러: 새로운 방식으로 호출 성공")
+                    except TypeError as te:
+                        # 매개변수 오류 발생 시 기존 방식으로 호출
+                        log_progress(f"  '{tool_name}' 핸들러: 기존 방식으로 fallback 호출 - {te}")
+                        tool_response = target_tool.func(sub_question)
+                    
                     individual_responses.append(tool_response)
                     log_progress(f"  '{tool_name}' 핸들러 응답: '{tool_response}'")
+                    
                 except Exception as tool_e:
                     log_progress(f"  [❌ {tool_name} 핸들러 오류]: {tool_e}")
                     individual_responses.append(f"'{sub_question}' 질문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
