@@ -155,66 +155,71 @@ def detect_leave_type(text: str) -> str:
         return "휴가"  # 기본값
 
 # ✅ 메인 응답 함수
+# leave_handler.py - 수정된 메인 응답 함수
 
-def answer(question: str) -> str:
-    if not question.strip():
+def answer(user_input: str, student_id: int = None, student_info: dict = None) -> str:
+    """
+    휴가/조퇴/병가 신청을 처리하는 메인 함수
+    
+    Args:
+        user_input (str): 사용자 입력 텍스트
+        student_id (int): 학생 ID (main_chat_two.py에서 전달받음)
+        student_info (dict): 학생 정보 딕셔너리 (필요시 사용)
+    
+    Returns:
+        str: 처리 결과 메시지
+    """
+    if not user_input.strip():
         return "질문을 입력해주세요."
 
-    try:
-        if is_leave_intent(question):
-            print("🧭 [휴가 신청 의도 판단됨 → LLM 파싱 시도]")
-            info = extract_leave_info(question)
+    # student_id가 전달되지 않은 경우 기본값 사용 (하위 호환성)
+    if student_id is None:
+        student_id = 1
+        print(f"⚠️ [경고] student_id가 전달되지 않아 기본값({student_id}) 사용")
 
+    try:
+        if is_leave_intent(user_input):
+            print("🧭 [휴가 신청 의도 판단됨 → LLM 파싱 시도]")
+            info = extract_leave_info(user_input)
             start = info.get("start_date")
             end = info.get("end_date")
-            start_time = info.get("start_time")
-            end_time = info.get("end_time")
             reason = info.get("reason")
-            type_big = info.get("type_big")
-            type_small = info.get("type_small")
 
-            if type_big == "조퇴":
-                today = datetime.today().strftime("%Y-%m-%d")
-                start = today
-                end = today
-
-            is_complete = all([start, end, reason])
-            if type_big == "조퇴":
-                is_complete = is_complete and start_time and end_time
-
-            if not is_complete:
-                type_label = type_big if type_big else "휴가 또는 조퇴 등"
+            if not (start and end and reason):
                 return (
-                    f"{type_label}를 신청하시려는 것 같네요!\n"
-                    f"📅 언제부터 언제까지 예정인가요? 오늘인가요?\n"
-                    f"📝 그리고 사유도 함께 알려주세요!"
+                    "휴가 또는 조퇴를 신청하시려는 것 같네요!\n"
+                    "📅 언제부터 언제까지 쉬실 예정인가요?\n"
+                    "📝 그리고 사유도 함께 알려주세요!"
                 )
 
-            # ⛔ student_id는 없으므로 강제로 1로 고정 (정상 처리 X)
+            # 🔄 수정: main_chat_two.py에서 받은 student_id 사용
             success = insert_attendance_request(
-                student_id=1,
-                type_big=type_big or "휴가",
-                type_small=type_small or "기타",
+                student_id=student_id,  # 전달받은 student_id 사용
+                type_big="휴가",
+                type_small="기타",
                 start_dt=start,
                 end_dt=end,
                 reason=reason
             )
 
             if success:
-                msg = (
-                    f"✅ {type_big} 신청이 정상적으로 접수되었습니다!\n"
+                # student_info가 있다면 학생 이름 사용
+                student_name = "훈련생"
+                if student_info and "STUDENT_NAME" in student_info:
+                    student_name = student_info["STUDENT_NAME"]
+                
+                return (
+                    f"✅ {student_name}님의 휴가 신청이 정상적으로 접수되었습니다!\n"
                     f"⏰ 기간: {start} ~ {end}\n"
+                    f"📝 사유: {reason}\n"
+                    f"승인까지 잠시 기다려주세요."
                 )
-                if type_big == "조퇴":
-                    msg += f"🕒 시간: {start_time} ~ {end_time}\n"
-                msg += f"📝 사유: {reason}\n승인까지 잠시 기다려주세요."
-                return msg
             else:
-                return "❌ 신청 처리 중 오류가 발생했습니다. 다시 시도해주세요."
+                return "❌ 휴가 신청 처리 중 오류가 발생했습니다. 다시 시도해주세요."
 
-        # 일반 정보 질의 (RAG)
+        # 일반 정보 질의 → RAG
         print("🔍 [일반 정보 질의 → 문서 검색 시작]")
-        result = qa_chain(question)
+        result = qa_chain(user_input)
 
         source_docs = result["source_documents"]
         print(f"\n📚 [참고한 문서 수]: {len(source_docs)}")

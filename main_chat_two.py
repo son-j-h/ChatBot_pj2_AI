@@ -285,26 +285,45 @@ def answer():
             # tools 리스트에서 해당하는 Tool 객체를 찾습니다.
             target_tool = next((t for t in tools if t.name == tool_name), None)
 
-            if target_tool:
-                log_progress(f"  '{tool_name}' 핸들러 호출 중...")
-                try:
-                    # 해당 핸들러의 'func' (answer 함수)를 직접 호출합니다.
-                    tool_args = {
-                        "question": sub_question,
-                        "student_id": current_student_id,
-                        "student_info": student_info
-                    }
+            # main_chat_two.py에서 수정할 부분
+
+            # 기존 코드에서 이 부분을 찾아서 수정하세요:
+            # main_chat_two.py에서 핸들러 호출 부분을 다음과 같이 수정하세요:
+
+        if target_tool:
+            log_progress(f"  '{tool_name}' 핸들러 호출 중...")
+            try:
+                # 🔄 안전한 핸들러 호출: 함수 시그니처를 확인하여 호출
+                import inspect
+                
+                # 핸들러 함수의 매개변수 확인
+                func_signature = inspect.signature(target_tool.func)
+                func_params = list(func_signature.parameters.keys())
+                
+                # student_id와 student_info 매개변수가 있는지 확인
+                if 'student_id' in func_params and 'student_info' in func_params:
+                    # 새로운 시그니처를 지원하는 핸들러
+                    log_progress(f"  '{tool_name}' 핸들러: student_id 매개변수 지원")
+                    tool_response = target_tool.func(
+                        sub_question, 
+                        student_id=current_student_id, 
+                        student_info=student_info
+                    )
+                elif 'student_id' in func_params:
+                    # student_id만 지원하는 핸들러
+                    log_progress(f"  '{tool_name}' 핸들러: student_id만 지원")
+                    tool_response = target_tool.func(sub_question, student_id=current_student_id)
+                else:
+                    # 기존 방식 (매개변수 1개만)
+                    log_progress(f"  '{tool_name}' 핸들러: 기존 방식 호출")
                     tool_response = target_tool.func(sub_question)
-                    individual_responses.append(tool_response)
-                    log_progress(f"  '{tool_name}' 핸들러 응답: '{tool_response}'")
-                except Exception as tool_e:
-                    log_progress(f"  [❌ {tool_name} 핸들러 오류]: {tool_e}")
-                    individual_responses.append(f"'{sub_question}' 질문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
-            else:
-                # 라우터 LLM이 존재하지 않는 툴 이름을 반환한 경우
-                error_msg = f"'{sub_question}' 질문에 해당하는 처리기({tool_name})를 찾을 수 없습니다."
-                individual_responses.append(error_msg)
-                log_progress(f"  ❌ {error_msg}")
+                
+                individual_responses.append(tool_response)
+                log_progress(f"  '{tool_name}' 핸들러 응답: '{tool_response}'")
+                
+            except Exception as tool_e:
+                log_progress(f"  [❌ {tool_name} 핸들러 오류]: {tool_e}")
+                individual_responses.append(f"'{sub_question}' 질문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
         
         log_progress(f"모든 개별 핸들러 실행 완료. 수집된 개별 답변: {individual_responses}")
 
