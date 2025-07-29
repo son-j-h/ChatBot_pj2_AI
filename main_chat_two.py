@@ -61,7 +61,12 @@ tools = [
     Tool(
         name="LeaveHandler",
         func=leave_handler.answer,
-        description="사용자가 휴가, 조퇴, 병가를 *직접 신청하겠다고 요청할 때만* 답변합니다. 휴가/조퇴/병가의 절차나 규정에 대한 일반적인 문의는 VacationHandler에서 처리합니다. 예시: '다음 주 수요일에 병가 신청하고 싶어요', '오늘 오후에 조퇴 가능할까요?', '0월 0일에 휴가 신청해주세요.'",
+        description=(
+            "사용자가 휴가, 공가, 병가, 조퇴를 *직접 신청하거나, 그 신청 내역을 조회하겠다고 요청할 때만* 답변합니다. "
+            "예를 들어 '휴가 신청할게요', '병가 내역 보여줘', '지난 휴가 내역 알려줘' 같은 질문은 이 핸들러가 처리합니다. "
+            "휴가/공가/병가/조퇴의 절차나 규정에 대한 일반적인 문의는 VacationHandler에서 처리합니다. "
+            "예시: '다음 주 수요일에 병가 신청하고 싶어요', '오늘 오후에 조퇴 가능할까요?', '0월 0일에 휴가 신청해주세요', '내 휴가 내역 확인하고 싶어'."
+        )
     ),
     Tool(
         name="VacationHandler",
@@ -142,6 +147,7 @@ def extract_student_id(user_input: str) -> str or None:
 
 @app.route("/answer", methods=["POST"])
 def answer():
+    intermediate_messages = []
     log_progress("--- answer() 함수 진입 ---")
     data = request.get_json()
     user_input = data.get("message", "").strip()
@@ -162,14 +168,15 @@ def answer():
             log_progress(f"세션 {session_id}: 초기 상태. 학번 요청 메시지 반환.")
             return jsonify(
                 {
-                    "response": "안녕하세요. 패캠 행정문의 챗봇 '우주🌌🧑‍🚀' 입니다. 학번을 말해주세요."
+                    "response": "안녕하세요. 패캠 행정문의 챗봇 '우주🌌🧑‍🚀' 입니다. 학번을 말해주세요.",
+                    "isFinalAnswer": False
                 }
             )
         else:
             log_progress(
                 f"세션 {session_id}: 사용자 입력이 비어있습니다. 오류 응답 반환."
             )
-            return jsonify({"response": "질문을 입력해주세요."}), 400
+            return jsonify({"response": "질문을 입력해주세요.", "isFinalAnswer": False}), 400
 
     log_progress(
         f"세션 {session_id} - 사용자 입력: '{user_input}', 현재 상태: {current_session['state']}"
@@ -178,7 +185,7 @@ def answer():
     # ✅ 욕설 필터링 ①
     if is_profanity(user_input):
         log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
-        return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
+        return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ", "isFinalAnswer": False}), 200
 
     # --------------------------------------------------------------------
     # 학번 입력 대기 상태 처리
@@ -203,7 +210,7 @@ def answer():
                     f"세션 {session_id}: 학번 '{extracted_id}' ({student_name}) 확인. 대화 상태로 전환."
                 )
                 return jsonify(
-                    {"response": f"{student_name}님, 어떤 것이 궁금하신가요?"}
+                    {"response": f"{student_name}님, 어떤 것이 궁금하신가요?", "isFinalAnswer": False}
                 )
             else:
                 log_progress(
@@ -211,7 +218,7 @@ def answer():
                 )
                 return jsonify(
                     {
-                        "response": f"입력하신 학번({extracted_id})으로 학생 정보를 찾을 수 없습니다. 정확한 학번을 다시 알려주시겠어요?"
+                        "response": f"입력하신 학번({extracted_id})으로 학생 정보를 찾을 수 없습니다. 정확한 학번을 다시 알려주시겠어요?", "isFinalAnswer": False
                     }
                 )
         else:
@@ -221,7 +228,7 @@ def answer():
             )
             return jsonify(
                 {
-                    "response": "죄송합니다. 먼저 학번을 알려주세요. 학번은 4자리의 숫자로 입력해주세요."
+                    "response": "죄송합니다. 먼저 학번을 알려주세요. 학번은 4자리의 숫자로 입력해주세요.", "isFinalAnswer": False
                 }
             )
 
@@ -235,46 +242,62 @@ def answer():
         # ✅ 욕설 필터링 ①
         if is_profanity(user_input):
             log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
-            return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
-
-
-        # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
-        rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
-        rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
+            return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ", "isFinalAnswer": False}), 200
 
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
         rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
         rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
 
+
+        log_progress("rag_contextrag_context");
+        log_progress(rag_context);
+        
         # 1단계: 질문 분해 및 의도 분류 (Intent Classification)
         log_progress("1단계: 질문 분해 및 의도 분류 시작 (라우터 LLM 호출)")
+        intermediate_messages.append("질문 내용을 분석하고 있어요...")
         router_prompt_template = PromptTemplate(
             template="""
-            당신은 사용자 질문을 분석하여 관련된 기능(tool)과 해당 기능에 전달할 질문을 분리하는 AI 비서입니다.
-            아래에 정의된 tool들을 참고하여 사용자의 질문을 가장 적절하게 1개 이상의 tool과 sub_question으로 분리해주세요.
-            **만약 사용자의 질문에 특정 개인 정보를 요구하는 질문(예: '내 수료증 발급', '내 훈련 장려금', '내 휴가')이라면,
-            tool_name을 'RequireStudentID'로 설정하고 sub_question에 '학번이 필요합니다.'라고 명시해주세요.**
-            (현재 사용자의 학번이 {current_student_id}로 확인되었으므로, 'RequireStudentID'로 분류된 질문도 이 학번을 사용하여 처리할 수 있습니다.)
-            만약 해당하는 tool이 없거나 질문의 의도를 명확히 알 수 없으면 tool_name을 'General'로 설정하고 sub_question에 원본 질문을 그대로 넣어주세요.
-            결과는 반드시 JSON 형식의 배열로 반환해야 합니다.
+        당신은 사용자 질문을 분석하여 관련된 기능(tool)과 해당 기능에 전달할 질문을 분리하는 AI 비서입니다.
 
-            Tool Definitions:
-            - CertificateHandler: {certificate_desc}
-            - LeaveHandler: {leave_desc}
-            - VacationHandler: {vacation_desc}
-            - AttendanceHandler: {attendance_desc}
-            - SubsidyHandler: {subsidy_desc}
-            - RequireStudentID: 특정 개인 정보 조회를 위해 학번이 필요한 경우. 예시: '내 훈련 장려금 알려줘', '내 휴가 신청해줘', '나의 수강증명서 발급받고 싶어.'
+        아래에 정의된 tool들을 참고하여, 사용자의 질문을 하나 이상의 적절한 tool_name과 sub_question으로 분리해주세요.
 
-            사용자 질문: {user_input}
+        ---
 
-            JSON 형식 예시:
-            [
-              {{"tool_name": "CertificateHandler", "sub_question": "수료증 발급 어떻게 받나요?"}},
-              {{"tool_name": "RequireStudentID", "sub_question": "학번이 필요합니다."}},
-              {{"tool_name": "VacationHandler", "sub_question": "병가 사용 규정이 어떻게 되나요?"}}
-            ]
-            """,
+        **주의 사항**
+
+        - 사용자의 질문이 *개인 정보 기반의 조회*를 요구할 경우 (예: "내 수료증", "내 장려금", "내 휴가 내역") → tool_name: "RequireStudentID", sub_question: "학번이 필요합니다." 로 응답하세요.
+        - 단, 아래와 같은 경우는 **RequireStudentID로 분류하지 마세요**:
+            - 학번이 이미 확인된 상태입니다. (현재 학번: {current_student_id})
+            - 예시: "내 휴가 내역", "내 병가 조회", "내 수료증 출력", "장려금 확인" → 해당 도메인에 맞는 tool로 직접 분류하세요.
+
+        - 적절한 tool이 없거나 질문의 의도가 모호할 경우 → tool_name: "General"로 설정하고, sub_question에는 원본 질문을 그대로 넣으세요.
+
+        ---
+
+        Tool Definitions:
+
+        - CertificateHandler: {certificate_desc}
+        - LeaveHandler: {leave_desc}
+        - VacationHandler: {vacation_desc}
+        - AttendanceHandler: {attendance_desc}
+        - SubsidyHandler: {subsidy_desc}
+        - RequireStudentID: 사용자의 학번이 필요한 요청(단, 이미 학번이 확인된 경우에는 사용하지 마세요)
+
+        ---
+
+        사용자 질문:
+        {user_input}
+
+        ---
+
+        반드시 다음 형식의 JSON **배열**로 반환하세요:
+        [
+        {{"tool_name": "CertificateHandler", "sub_question": "수료증 발급 어떻게 받나요?"}},
+        {{"tool_name": "RequireStudentID", "sub_question": "학번이 필요합니다."}},
+        {{"tool_name": "VacationHandler", "sub_question": "병가 사용 규정이 어떻게 되나요?"}}
+        {{"tool_name": "LeaveHandler", "sub_question": "내 병가 신청하고 싶어요"}}
+        ]
+        """,
             input_variables=[
                 "user_input",
                 "certificate_desc",
@@ -282,10 +305,16 @@ def answer():
                 "vacation_desc",
                 "attendance_desc",
                 "subsidy_desc",
-            ],
+                "current_student_id"
+            ]
         )
 
+<<<<<<< HEAD
         router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template, verbose=True)
+=======
+
+        router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template)
+>>>>>>> upstream/master
 
         # 라우터 LLM을 호출하여 의도 분류 결과를 받습니다.
         raw_routing_output = router_chain.run(
@@ -323,12 +352,22 @@ def answer():
             if not isinstance(parsed_intents, list):
                 parsed_intents = [parsed_intents]
             log_progress(f"파싱된 의도: {parsed_intents}")
+            
+            # 분류된 카테고리 이름을 사용자에게 표시
+            tool_names = [intent['tool_name'] for intent in parsed_intents if intent['tool_name'] != 'General']
+            if tool_names:
+                display_tools = ", ".join(tool_names)
+                intermediate_messages.append(f"문의하신 내용을 '{display_tools}' 관련으로 분류했습니다.")
+            else:
+                intermediate_messages.append("질문 의도를 파악했습니다.")
+                
         except json.JSONDecodeError:
             log_progress(
                 f"❌ 라우터 LLM 출력 JSON 파싱 실패: {processed_router_llm_output}. 전체 질문을 'General' 의도로 처리합니다."
             )
             # JSON 파싱 실패 시, 전체 질문을 'General' 의도로 처리하는 폴백 로직
             parsed_intents = [{"tool_name": "General", "sub_question": user_input}]
+            intermediate_messages.append("질문 분석에 문제가 발생하여 일반적인 방법으로 답변을 준비합니다.")
 
         # 파싱된 의도가 없으면 (예: 빈 리스트 반환) 'General' 의도로 처리합니다.
         if not parsed_intents:
@@ -336,6 +375,7 @@ def answer():
                 "파싱된 의도가 없습니다. 전체 질문을 'General' 의도로 처리합니다."
             )
             parsed_intents = [{"tool_name": "General", "sub_question": user_input}]
+            intermediate_messages.append("질문 의도를 파악하지 못했습니다. 일반적인 답변을 준비합니다.")
 
         individual_responses = []  # 각 핸들러에서 받은 답변들을 저장할 리스트
 
@@ -349,6 +389,8 @@ def answer():
             log_progress(
                 f"  [{i+1}/{len(parsed_intents)}] 처리 중 의도: tool_name='{tool_name}', sub_question='{sub_question}'"
             )
+            intermediate_messages.append(f"'{tool_name}' 관련 정보를 조회하고 있어요...") # 개별 조회 시작 메시지
+
 
             # tool_name 또는 sub_question이 유효하지 않으면 건너뜁니다.
             if not tool_name or not sub_question:
@@ -380,20 +422,26 @@ def answer():
             if target_tool:
                 log_progress(f"  '{tool_name}' 핸들러 호출 중...")
                 try:
-                    # 해당 핸들러의 'func' (answer 함수)를 직접 호출합니다.
-                    tool_args = {
-                        "question": sub_question,
-                        "student_id": current_student_id,
-                        "student_info": student_info,
-                    }
-                    tool_response = target_tool.func(sub_question)
+                    # 🔄 수정: 먼저 새로운 방식으로 시도, 실패하면 기존 방식으로 fallback
+                    try:
+                        # 새로운 방식: student_id와 student_info 전달
+                        tool_response = target_tool.func(
+                            sub_question, 
+                            student_id=current_student_id, 
+                            student_info=student_info
+                        )
+                        log_progress(f"  '{tool_name}' 핸들러: 새로운 방식으로 호출 성공")
+                    except TypeError as te:
+                        # 매개변수 오류 발생 시 기존 방식으로 호출
+                        log_progress(f"  '{tool_name}' 핸들러: 기존 방식으로 fallback 호출 - {te}")
+                        tool_response = target_tool.func(sub_question)
+                    
                     individual_responses.append(tool_response)
                     log_progress(f"  '{tool_name}' 핸들러 응답: '{tool_response}'")
+                    
                 except Exception as tool_e:
                     log_progress(f"  [❌ {tool_name} 핸들러 오류]: {tool_e}")
-                    individual_responses.append(
-                        f"'{sub_question}' 질문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-                    )
+                    individual_responses.append(f"'{sub_question}' 질문 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.")
             else:
                 # 라우터 LLM이 존재하지 않는 툴 이름을 반환한 경우
                 error_msg = f"'{sub_question}' 질문에 해당하는 처리기({tool_name})를 찾을 수 없습니다."
@@ -403,6 +451,8 @@ def answer():
         log_progress(
             f"모든 개별 핸들러 실행 완료. 수집된 개별 답변: {individual_responses}"
         )
+        intermediate_messages.append("수집된 정보를 통합하여 답변을 정리하고 있어요...") # 답변 통합 시작 메시지
+
 
         # --------------------------------------------------------------------
         # 3단계: 답변 통합 (Response Synthesis)
@@ -461,7 +511,7 @@ def answer():
         # final_response = f"모든 답변은 한국어로 제공됩니다. {final_response.strip()}"
 
         log_progress("--- answer() 함수 종료 ---")
-        return jsonify({"response": final_response.strip()})  # 불필요한 공백 제거
+        return jsonify({"response": final_response.strip(), "intermediateMessages": intermediate_messages, "isFinalAnswer": True})  # 불필요한 공백 제거
 
     except Exception as e:
         # 전체 처리 과정에서 예상치 못한 오류가 발생한 경우
@@ -469,7 +519,9 @@ def answer():
         return (
             jsonify(
                 {
-                    "response": "답변 처리 중 예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                    "response": "답변 처리 중 예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+                    "intermediateMessages": "요청 처리 중 오류가 발생했습니다.",
+                    "isFinalAnswer": False
                 }
             ),
             500,
