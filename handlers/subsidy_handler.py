@@ -54,7 +54,7 @@ def build_chain():
 
     llm = ChatOpenAI(
         model_name="gpt-4o",
-        temperature=0.3,
+        temperature=0,
         max_tokens=800,
         openai_api_key=OPENAI_API_KEY
     )
