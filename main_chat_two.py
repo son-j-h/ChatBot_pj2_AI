@@ -51,7 +51,7 @@ synthesizer_llm = ChatOpenAI(
     model_name="gpt-4o", temperature=0.2, openai_api_key=openai_key
 )
 
-# 기존의 툴 정의는 그대로 유지합니다. 각 툴은 특정 도메인의 질문에 답변하는 역할을 합니다.
+# ✅ 개선된 툴 정의 - LeaveHandler description 보강
 tools = [
     Tool(
         name="CertificateHandler",
@@ -61,12 +61,13 @@ tools = [
     Tool(
         name="LeaveHandler",
         func=leave_handler.answer,
-        description=(
-            "사용자가 휴가, 공가, 병가, 조퇴를 *직접 신청하거나, 그 신청 내역을 조회하겠다고 요청할 때만* 답변합니다. "
-            "예를 들어 '휴가 신청할게요', '병가 내역 보여줘', '지난 휴가 내역 알려줘' 같은 질문은 이 핸들러가 처리합니다. "
-            "휴가/공가/병가/조퇴의 절차나 규정에 대한 일반적인 문의는 VacationHandler에서 처리합니다. "
-            "예시: '다음 주 수요일에 병가 신청하고 싶어요', '오늘 오후에 조퇴 가능할까요?', '0월 0일에 휴가 신청해주세요', '내 휴가 내역 확인하고 싶어'."
-        )
+        description="""
+사용자가 휴가, 병가, 공가, 조퇴를 직접 신청하거나,
+해당 신청 내역을 조회 또는 취소하려고 할 때 사용됩니다.
+특히 신청 ID를 명시한 취소 요청이나 자연어 기반 취소 요청을 처리합니다.
+예시: '휴가 내역 보여줘', '신청했던 병가 취소', 'ID:33번 취소', '어제 신청한 조퇴 없애줘',
+'다음주 수요일 휴가 신청', '오늘 오후 조퇴하고 싶어', '33번 신청 취소해줘'
+""".strip()
     ),
     Tool(
         name="VacationHandler",
@@ -104,6 +105,45 @@ def is_profanity(text: str) -> bool:
     ])
 
     return "예" in result.content
+
+
+# ✅ 패턴 기반 라우팅 전처리 함수
+def get_forced_routing(user_input: str) -> str or None:
+    """
+    특정 패턴에 해당하는 사용자 입력을 강제로 특정 Tool로 라우팅합니다.
+    
+    Args:
+        user_input (str): 사용자 입력
+        
+    Returns:
+        str or None: 강제 라우팅할 Tool 이름 또는 None
+    """
+    # ID 기반 취소 요청 패턴
+    cancel_patterns = [
+        r"(ID|REQUEST_ID)[\s:]*\d+.*취소",  # ID:33 취소, ID 33 취소
+        r"\d+번.*취소",                      # 33번 취소, 33번 신청 취소
+        r"신청[\s]*\d+.*취소",               # 신청 33 취소, 신청33번 취소
+        r"\d+.*신청.*취소",                  # 33 신청 취소해줘
+    ]
+    
+    for pattern in cancel_patterns:
+        if re.search(pattern, user_input, re.IGNORECASE):
+            log_progress(f"패턴 기반 강제 라우팅: '{user_input}' → LeaveHandler")
+            return "LeaveHandler"
+    
+    # 휴가/병가/조퇴 관련 취소 요청
+    leave_cancel_patterns = [
+        r"(휴가|병가|공가|조퇴).*취소",       # 휴가 취소, 병가 취소해줘
+        r"취소.*(휴가|병가|공가|조퇴)",       # 취소하고 싶어 휴가
+        r"(신청|등록).*취소",                # 신청 취소, 등록 취소
+    ]
+    
+    for pattern in leave_cancel_patterns:
+        if re.search(pattern, user_input, re.IGNORECASE):
+            log_progress(f"패턴 기반 강제 라우팅: '{user_input}' → LeaveHandler")
+            return "LeaveHandler"
+    
+    return None
 
 
 # 로깅을 위한 헬퍼 함수
@@ -239,135 +279,140 @@ def answer():
         current_student_id = current_session["student_id"]
         student_info = current_session["student_info"]
 
-        # ✅ 욕설 필터링 ①
+        # ✅ 욕설 필터링 ②
         if is_profanity(user_input):
             log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
             return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ", "isFinalAnswer": False}), 200
 
-        # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
-        rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
-        rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
-
-        # 1단계: 질문 분해 및 의도 분류 (Intent Classification)
-        log_progress("1단계: 질문 분해 및 의도 분류 시작 (라우터 LLM 호출)")
-        intermediate_messages.append("질문 내용을 분석하고 있어요...")
-        router_prompt_template = PromptTemplate(
-            template="""
-        당신은 사용자 질문을 분석하여 관련된 기능(tool)과 해당 기능에 전달할 질문을 분리하는 AI 비서입니다.
-
-        아래에 정의된 tool들을 참고하여, 사용자의 질문을 하나 이상의 적절한 tool_name과 sub_question으로 분리해주세요.
-
-        ---
-
-        **주의 사항**
-
-        - 사용자의 질문이 *개인 정보 기반의 조회*를 요구할 경우 (예: "내 수료증", "내 장려금", "내 휴가 내역") → tool_name: "RequireStudentID", sub_question: "학번이 필요합니다." 로 응답하세요.
-        - 단, 아래와 같은 경우는 **RequireStudentID로 분류하지 마세요**:
-            - 학번이 이미 확인된 상태입니다. (현재 학번: {current_student_id})
-            - 예시: "내 휴가 내역", "내 병가 조회", "내 수료증 출력", "장려금 확인" → 해당 도메인에 맞는 tool로 직접 분류하세요.
-
-        - 적절한 tool이 없거나 질문의 의도가 모호할 경우 → tool_name: "General"로 설정하고, sub_question에는 원본 질문을 그대로 넣으세요.
-
-        ---
-
-        Tool Definitions:
-
-        - CertificateHandler: {certificate_desc}
-        - LeaveHandler: {leave_desc}
-        - VacationHandler: {vacation_desc}
-        - AttendanceHandler: {attendance_desc}
-        - SubsidyHandler: {subsidy_desc}
-        - RequireStudentID: 사용자의 학번이 필요한 요청(단, 이미 학번이 확인된 경우에는 사용하지 마세요)
-
-        ---
-
-        사용자 질문:
-        {user_input}
-
-        ---
-
-        반드시 다음 형식의 JSON **배열**로 반환하세요:
-        [
-        {{"tool_name": "CertificateHandler", "sub_question": "수료증 발급 어떻게 받나요?"}},
-        {{"tool_name": "RequireStudentID", "sub_question": "학번이 필요합니다."}},
-        {{"tool_name": "VacationHandler", "sub_question": "병가 사용 규정이 어떻게 되나요?"}}
-        {{"tool_name": "LeaveHandler", "sub_question": "내 병가 신청하고 싶어요"}}
-        ]
-        """,
-            input_variables=[
-                "user_input",
-                "certificate_desc",
-                "leave_desc",
-                "vacation_desc",
-                "attendance_desc",
-                "subsidy_desc",
-                "current_student_id"
-            ]
-        )
-
-
-        router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template)
-
-        # 라우터 LLM을 호출하여 의도 분류 결과를 받습니다.
-        raw_routing_output = router_chain.run(
-            user_input=user_input,
-            certificate_desc=tools[0].description,
-            leave_desc=tools[1].description,
-            vacation_desc=tools[2].description,
-            attendance_desc=tools[3].description,
-            subsidy_desc=tools[4].description,
-            current_student_id=current_student_id,  # 현재 학번을 프롬프트에 전달
-        )
-        log_progress(f"라우터 LLM 원본 응답: {raw_routing_output}")
-
-        # --- 이 부분이 중요합니다. JSON 파싱 전에 전처리! ---
-        processed_router_llm_output = raw_routing_output.strip()
-
-        # 만약 응답이 ```json 으로 시작하고 ``` 로 끝난다면 제거
-        if processed_router_llm_output.startswith(
-            "```json"
-        ) and processed_router_llm_output.endswith("```"):
-            # ```json 와 ``` 를 제거하고, 내부의 줄바꿈과 공백을 정리 (strip)
-            processed_router_llm_output = processed_router_llm_output[
-                len("```json") : -len("```")
-            ].strip()
-            log_progress(
-                f"DEBUG: 백틱 제거 후 전처리된 LLM 응답: {processed_router_llm_output}"
-            )
-        # --- 수정 끝 ---
-
-        parsed_intents = []
-        try:
-            # LLM 응답을 JSON으로 파싱합니다.
-            parsed_intents = json.loads(processed_router_llm_output)
-            # LLM이 때때로 단일 객체를 반환할 수 있으므로, 리스트가 아니면 리스트로 감쌉니다.
-            if not isinstance(parsed_intents, list):
-                parsed_intents = [parsed_intents]
-            log_progress(f"파싱된 의도: {parsed_intents}")
+        # ✅ 패턴 기반 강제 라우팅 체크
+        forced_tool = get_forced_routing(user_input)
+        
+        if forced_tool:
+            # 강제 라우팅이 적용된 경우, 해당 tool로 직접 전달
+            log_progress(f"강제 라우팅 적용: {forced_tool}")
+            intermediate_messages.append(f"패턴 분석을 통해 '{forced_tool}' 관련 요청으로 분류했습니다.")
             
-            # 분류된 카테고리 이름을 사용자에게 표시
-            tool_names = [intent['tool_name'] for intent in parsed_intents if intent['tool_name'] != 'General']
-            if tool_names:
-                display_tools = ", ".join(tool_names)
-                intermediate_messages.append(f"문의하신 내용을 '{display_tools}' 관련으로 분류했습니다.")
-            else:
-                intermediate_messages.append("질문 의도를 파악했습니다.")
-                
-        except json.JSONDecodeError:
-            log_progress(
-                f"❌ 라우터 LLM 출력 JSON 파싱 실패: {processed_router_llm_output}. 전체 질문을 'General' 의도로 처리합니다."
-            )
-            # JSON 파싱 실패 시, 전체 질문을 'General' 의도로 처리하는 폴백 로직
-            parsed_intents = [{"tool_name": "General", "sub_question": user_input}]
-            intermediate_messages.append("질문 분석에 문제가 발생하여 일반적인 방법으로 답변을 준비합니다.")
+            parsed_intents = [{"tool_name": forced_tool, "sub_question": user_input}]
+        else:
+            # 1단계: 질문 분해 및 의도 분류 (Intent Classification)
+            log_progress("1단계: 질문 분해 및 의도 분류 시작 (라우터 LLM 호출)")
+            intermediate_messages.append("질문 내용을 분석하고 있어요...")
+            router_prompt_template = PromptTemplate(
+                template="""
+            당신은 사용자 질문을 분석하여 관련된 기능(tool)과 해당 기능에 전달할 질문을 분리하는 AI 비서입니다.
 
-        # 파싱된 의도가 없으면 (예: 빈 리스트 반환) 'General' 의도로 처리합니다.
-        if not parsed_intents:
-            log_progress(
-                "파싱된 의도가 없습니다. 전체 질문을 'General' 의도로 처리합니다."
+            아래에 정의된 tool들을 참고하여, 사용자의 질문을 하나 이상의 적절한 tool_name과 sub_question으로 분리해주세요.
+
+            ---
+
+            **주의 사항**
+
+            - 사용자의 질문이 *개인 정보 기반의 조회*를 요구할 경우 (예: "내 수료증", "내 장려금", "내 휴가 내역") → tool_name: "RequireStudentID", sub_question: "학번이 필요합니다." 로 응답하세요.
+            - 단, 아래와 같은 경우는 **RequireStudentID로 분류하지 마세요**:
+                - 학번이 이미 확인된 상태입니다. (현재 학번: {current_student_id})
+                - 예시: "내 휴가 내역", "내 병가 조회", "내 수료증 출력", "장려금 확인" → 해당 도메인에 맞는 tool로 직접 분류하세요.
+
+            - 적절한 tool이 없거나 질문의 의도가 모호할 경우 → tool_name: "General"로 설정하고, sub_question에는 원본 질문을 그대로 넣으세요.
+
+            ---
+
+            Tool Definitions:
+
+            - CertificateHandler: {certificate_desc}
+            - LeaveHandler: {leave_desc}
+            - VacationHandler: {vacation_desc}
+            - AttendanceHandler: {attendance_desc}
+            - SubsidyHandler: {subsidy_desc}
+            - RequireStudentID: 사용자의 학번이 필요한 요청(단, 이미 학번이 확인된 경우에는 사용하지 마세요)
+
+            ---
+
+            사용자 질문:
+            {user_input}
+
+            ---
+
+            반드시 다음 형식의 JSON **배열**로 반환하세요:
+            [
+            {{"tool_name": "CertificateHandler", "sub_question": "수료증 발급 어떻게 받나요?"}},
+            {{"tool_name": "RequireStudentID", "sub_question": "학번이 필요합니다."}},
+            {{"tool_name": "VacationHandler", "sub_question": "병가 사용 규정이 어떻게 되나요?"}}
+            {{"tool_name": "LeaveHandler", "sub_question": "내 병가 신청하고 싶어요"}}
+            ]
+            """,
+                input_variables=[
+                    "user_input",
+                    "certificate_desc",
+                    "leave_desc",
+                    "vacation_desc",
+                    "attendance_desc",
+                    "subsidy_desc",
+                    "current_student_id"
+                ]
             )
-            parsed_intents = [{"tool_name": "General", "sub_question": user_input}]
-            intermediate_messages.append("질문 의도를 파악하지 못했습니다. 일반적인 답변을 준비합니다.")
+
+            router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template)
+
+            # 라우터 LLM을 호출하여 의도 분류 결과를 받습니다.
+            raw_routing_output = router_chain.run(
+                user_input=user_input,
+                certificate_desc=tools[0].description,
+                leave_desc=tools[1].description,
+                vacation_desc=tools[2].description,
+                attendance_desc=tools[3].description,
+                subsidy_desc=tools[4].description,
+                current_student_id=current_student_id,  # 현재 학번을 프롬프트에 전달
+            )
+            log_progress(f"라우터 LLM 원본 응답: {raw_routing_output}")
+
+            # --- 이 부분이 중요합니다. JSON 파싱 전에 전처리! ---
+            processed_router_llm_output = raw_routing_output.strip()
+
+            # 만약 응답이 ```json 으로 시작하고 ``` 로 끝난다면 제거
+            if processed_router_llm_output.startswith(
+                "```json"
+            ) and processed_router_llm_output.endswith("```"):
+                # ```json 와 ``` 를 제거하고, 내부의 줄바꿈과 공백을 정리 (strip)
+                processed_router_llm_output = processed_router_llm_output[
+                    len("```json") : -len("```")
+                ].strip()
+                log_progress(
+                    f"DEBUG: 백틱 제거 후 전처리된 LLM 응답: {processed_router_llm_output}"
+                )
+            # --- 수정 끝 ---
+
+            parsed_intents = []
+            try:
+                # LLM 응답을 JSON으로 파싱합니다.
+                parsed_intents = json.loads(processed_router_llm_output)
+                # LLM이 때때로 단일 객체를 반환할 수 있으므로, 리스트가 아니면 리스트로 감쌉니다.
+                if not isinstance(parsed_intents, list):
+                    parsed_intents = [parsed_intents]
+                log_progress(f"파싱된 의도: {parsed_intents}")
+                
+                # 분류된 카테고리 이름을 사용자에게 표시
+                tool_names = [intent['tool_name'] for intent in parsed_intents if intent['tool_name'] != 'General']
+                if tool_names:
+                    display_tools = ", ".join(tool_names)
+                    intermediate_messages.append(f"문의하신 내용을 '{display_tools}' 관련으로 분류했습니다.")
+                else:
+                    intermediate_messages.append("질문 의도를 파악했습니다.")
+                    
+            except json.JSONDecodeError:
+                log_progress(
+                    f"❌ 라우터 LLM 출력 JSON 파싱 실패: {processed_router_llm_output}. 전체 질문을 'General' 의도로 처리합니다."
+                )
+                # JSON 파싱 실패 시, 전체 질문을 'General' 의도로 처리하는 폴백 로직
+                parsed_intents = [{"tool_name": "General", "sub_question": user_input}]
+                intermediate_messages.append("질문 분석에 문제가 발생하여 일반적인 방법으로 답변을 준비합니다.")
+
+            # 파싱된 의도가 없으면 (예: 빈 리스트 반환) 'General' 의도로 처리합니다.
+            if not parsed_intents:
+                log_progress(
+                    "파싱된 의도가 없습니다. 전체 질문을 'General' 의도로 처리합니다."
+                )
+                parsed_intents = [{"tool_name": "General", "sub_question": user_input}]
+                intermediate_messages.append("질문 의도를 파악하지 못했습니다. 일반적인 답변을 준비합니다.")
 
         individual_responses = []  # 각 핸들러에서 받은 답변들을 저장할 리스트
 
