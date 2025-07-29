@@ -163,14 +163,15 @@ def answer():
             log_progress(f"세션 {session_id}: 초기 상태. 학번 요청 메시지 반환.")
             return jsonify(
                 {
-                    "response": "안녕하세요. 패캠 행정문의 챗봇 '우주🌌🧑‍🚀' 입니다. 학번을 말해주세요."
+                    "response": "안녕하세요. 패캠 행정문의 챗봇 '우주🌌🧑‍🚀' 입니다. 학번을 말해주세요.",
+                    "isFinalAnswer": False
                 }
             )
         else:
             log_progress(
                 f"세션 {session_id}: 사용자 입력이 비어있습니다. 오류 응답 반환."
             )
-            return jsonify({"response": "질문을 입력해주세요."}), 400
+            return jsonify({"response": "질문을 입력해주세요.", "isFinalAnswer": False}), 400
 
     log_progress(
         f"세션 {session_id} - 사용자 입력: '{user_input}', 현재 상태: {current_session['state']}"
@@ -179,7 +180,7 @@ def answer():
     # ✅ 욕설 필터링 ①
     if is_profanity(user_input):
         log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
-        return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
+        return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ", "isFinalAnswer": False}), 200
 
     # --------------------------------------------------------------------
     # 학번 입력 대기 상태 처리
@@ -204,7 +205,7 @@ def answer():
                     f"세션 {session_id}: 학번 '{extracted_id}' ({student_name}) 확인. 대화 상태로 전환."
                 )
                 return jsonify(
-                    {"response": f"{student_name}님, 어떤 것이 궁금하신가요?"}
+                    {"response": f"{student_name}님, 어떤 것이 궁금하신가요?", "isFinalAnswer": False}
                 )
             else:
                 log_progress(
@@ -212,7 +213,7 @@ def answer():
                 )
                 return jsonify(
                     {
-                        "response": f"입력하신 학번({extracted_id})으로 학생 정보를 찾을 수 없습니다. 정확한 학번을 다시 알려주시겠어요?"
+                        "response": f"입력하신 학번({extracted_id})으로 학생 정보를 찾을 수 없습니다. 정확한 학번을 다시 알려주시겠어요?", "isFinalAnswer": False
                     }
                 )
         else:
@@ -222,7 +223,7 @@ def answer():
             )
             return jsonify(
                 {
-                    "response": "죄송합니다. 먼저 학번을 알려주세요. 학번은 4자리의 숫자로 입력해주세요.",
+                    "response": "죄송합니다. 먼저 학번을 알려주세요. 학번은 4자리의 숫자로 입력해주세요.", "isFinalAnswer": False
                 }
             )
 
@@ -236,11 +237,7 @@ def answer():
         # ✅ 욕설 필터링 ①
         if is_profanity(user_input):
             log_progress(f"세션 {session_id}: 욕설 필터링 - '{user_input}'")
-            return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ"}), 200
-
-        # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
-        rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
-        rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
+            return jsonify({"response": "그런 말은 하지 말아주세요ㅠㅠ", "isFinalAnswer": False}), 200
 
         # ✅ RAG 문맥 검색: 과거 대화 히스토리 불러오기
         rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
@@ -483,7 +480,7 @@ def answer():
         # final_response = f"모든 답변은 한국어로 제공됩니다. {final_response.strip()}"
 
         log_progress("--- answer() 함수 종료 ---")
-        return jsonify({"response": final_response.strip(), "intermediate_messages": intermediate_messages})  # 불필요한 공백 제거
+        return jsonify({"response": final_response.strip(), "intermediateMessages": intermediate_messages, "isFinalAnswer": True})  # 불필요한 공백 제거
 
     except Exception as e:
         # 전체 처리 과정에서 예상치 못한 오류가 발생한 경우
@@ -492,7 +489,8 @@ def answer():
             jsonify(
                 {
                     "response": "답변 처리 중 예상치 못한 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
-                    "intermediate_messages": "요청 처리 중 오류가 발생했습니다."
+                    "intermediateMessages": "요청 처리 중 오류가 발생했습니다.",
+                    "isFinalAnswer": False
                 }
             ),
             500,
