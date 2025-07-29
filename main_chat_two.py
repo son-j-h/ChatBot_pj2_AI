@@ -309,12 +309,8 @@ def answer():
             ]
         )
 
-<<<<<<< HEAD
-        router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template, verbose=True)
-=======
 
         router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template)
->>>>>>> upstream/master
 
         # 라우터 LLM을 호출하여 의도 분류 결과를 받습니다.
         raw_routing_output = router_chain.run(
