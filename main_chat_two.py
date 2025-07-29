@@ -61,7 +61,12 @@ tools = [
     Tool(
         name="LeaveHandler",
         func=leave_handler.answer,
-        description="사용자가 휴가, 조퇴, 병가를 *직접 신청하겠다고 요청할 때만* 답변합니다. 휴가/조퇴/병가의 절차나 규정에 대한 일반적인 문의는 VacationHandler에서 처리합니다. 예시: '다음 주 수요일에 병가 신청하고 싶어요', '오늘 오후에 조퇴 가능할까요?', '0월 0일에 휴가 신청해주세요.'",
+        description=(
+            "사용자가 휴가, 공가, 병가, 조퇴를 *직접 신청하거나, 그 신청 내역을 조회하겠다고 요청할 때만* 답변합니다. "
+            "예를 들어 '휴가 신청할게요', '병가 내역 보여줘', '지난 휴가 내역 알려줘' 같은 질문은 이 핸들러가 처리합니다. "
+            "휴가/공가/병가/조퇴의 절차나 규정에 대한 일반적인 문의는 VacationHandler에서 처리합니다. "
+            "예시: '다음 주 수요일에 병가 신청하고 싶어요', '오늘 오후에 조퇴 가능할까요?', '0월 0일에 휴가 신청해주세요', '내 휴가 내역 확인하고 싶어'."
+        )
     ),
     Tool(
         name="VacationHandler",
@@ -248,31 +253,47 @@ def answer():
         intermediate_messages.append("질문 내용을 분석하고 있어요...")
         router_prompt_template = PromptTemplate(
             template="""
-            당신은 사용자 질문을 분석하여 관련된 기능(tool)과 해당 기능에 전달할 질문을 분리하는 AI 비서입니다.
-            아래에 정의된 tool들을 참고하여 사용자의 질문을 가장 적절하게 1개 이상의 tool과 sub_question으로 분리해주세요.
-            **만약 사용자의 질문에 특정 개인 정보를 요구하는 질문(예: '내 수료증 발급', '내 훈련 장려금', '내 휴가')이라면,
-            tool_name을 'RequireStudentID'로 설정하고 sub_question에 '학번이 필요합니다.'라고 명시해주세요.**
-            (현재 사용자의 학번이 {current_student_id}로 확인되었으므로, 'RequireStudentID'로 분류된 질문도 이 학번을 사용하여 처리할 수 있습니다.)
-            만약 해당하는 tool이 없거나 질문의 의도를 명확히 알 수 없으면 tool_name을 'General'로 설정하고 sub_question에 원본 질문을 그대로 넣어주세요.
-            결과는 반드시 JSON 형식의 배열로 반환해야 합니다.
+        당신은 사용자 질문을 분석하여 관련된 기능(tool)과 해당 기능에 전달할 질문을 분리하는 AI 비서입니다.
 
-            Tool Definitions:
-            - CertificateHandler: {certificate_desc}
-            - LeaveHandler: {leave_desc}
-            - VacationHandler: {vacation_desc}
-            - AttendanceHandler: {attendance_desc}
-            - SubsidyHandler: {subsidy_desc}
-            - RequireStudentID: 특정 개인 정보 조회를 위해 학번이 필요한 경우. 예시: '내 훈련 장려금 알려줘', '내 휴가 신청해줘', '나의 수강증명서 발급받고 싶어.'
+        아래에 정의된 tool들을 참고하여, 사용자의 질문을 하나 이상의 적절한 tool_name과 sub_question으로 분리해주세요.
 
-            사용자 질문: {user_input}
+        ---
 
-            JSON 형식 예시:
-            [
-              {{"tool_name": "CertificateHandler", "sub_question": "수료증 발급 어떻게 받나요?"}},
-              {{"tool_name": "RequireStudentID", "sub_question": "학번이 필요합니다."}},
-              {{"tool_name": "VacationHandler", "sub_question": "병가 사용 규정이 어떻게 되나요?"}}
-            ]
-            """,
+        **주의 사항**
+
+        - 사용자의 질문이 *개인 정보 기반의 조회*를 요구할 경우 (예: "내 수료증", "내 장려금", "내 휴가 내역") → tool_name: "RequireStudentID", sub_question: "학번이 필요합니다." 로 응답하세요.
+        - 단, 아래와 같은 경우는 **RequireStudentID로 분류하지 마세요**:
+            - 학번이 이미 확인된 상태입니다. (현재 학번: {current_student_id})
+            - 예시: "내 휴가 내역", "내 병가 조회", "내 수료증 출력", "장려금 확인" → 해당 도메인에 맞는 tool로 직접 분류하세요.
+
+        - 적절한 tool이 없거나 질문의 의도가 모호할 경우 → tool_name: "General"로 설정하고, sub_question에는 원본 질문을 그대로 넣으세요.
+
+        ---
+
+        Tool Definitions:
+
+        - CertificateHandler: {certificate_desc}
+        - LeaveHandler: {leave_desc}
+        - VacationHandler: {vacation_desc}
+        - AttendanceHandler: {attendance_desc}
+        - SubsidyHandler: {subsidy_desc}
+        - RequireStudentID: 사용자의 학번이 필요한 요청(단, 이미 학번이 확인된 경우에는 사용하지 마세요)
+
+        ---
+
+        사용자 질문:
+        {user_input}
+
+        ---
+
+        반드시 다음 형식의 JSON **배열**로 반환하세요:
+        [
+        {{"tool_name": "CertificateHandler", "sub_question": "수료증 발급 어떻게 받나요?"}},
+        {{"tool_name": "RequireStudentID", "sub_question": "학번이 필요합니다."}},
+        {{"tool_name": "VacationHandler", "sub_question": "병가 사용 규정이 어떻게 되나요?"}}
+        {{"tool_name": "LeaveHandler", "sub_question": "내 병가 신청하고 싶어요"}}
+        ]
+        """,
             input_variables=[
                 "user_input",
                 "certificate_desc",
@@ -280,8 +301,10 @@ def answer():
                 "vacation_desc",
                 "attendance_desc",
                 "subsidy_desc",
-            ],
+                "current_student_id"
+            ]
         )
+
 
         router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template)
 
