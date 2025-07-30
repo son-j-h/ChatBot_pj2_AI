@@ -15,7 +15,7 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 if not google_api_key:
     raise EnvironmentError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-# ✅ 임베딩 + LLM 모델 (Gemini 기반)
+# ✅ 임베딩 + LLM 모델
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
     google_api_key=google_api_key
@@ -61,7 +61,7 @@ def is_leave_intent_llm(text: str) -> bool:
         response = llm.invoke(prompt).strip().lower()
         return "예" in response
     except Exception as e:
-        print(f"[❌ Gemini LLM 판단 오류]: {e}")
+        print(f"[❌ LLM 판단 오류]: {e}")
         return False
 
 def is_leave_intent(text: str) -> bool:
@@ -86,7 +86,7 @@ def is_inquiry_intent(text: str) -> bool:
     
     return has_inquiry
 
-# ✅ Gemini LLM으로 날짜, 사유 파싱 (JSON 안전 파싱)
+# ✅ LLM으로 날짜, 사유 파싱 (JSON 안전 파싱)
 def extract_leave_info(user_input: str) -> dict:
     prompt = f"""
 다음 문장에서 조퇴/휴가 신청 정보를 JSON 형식으로 추출해 주세요.
@@ -113,7 +113,7 @@ def extract_leave_info(user_input: str) -> dict:
 """
     try:
         response = llm.invoke(prompt).strip()
-        print(f"🧠 [Gemini LLM 파싱 응답]:\n{response}")
+        print(f"🧠 [LLM 파싱 응답]:\n{response}")
         # JSON 코드 블록 제거 처리
         if response.startswith("```json") and response.endswith("```"):
             response = response[7:-3].strip()
@@ -121,7 +121,7 @@ def extract_leave_info(user_input: str) -> dict:
             response = response[3:-3].strip()
         return json.loads(response)
     except Exception as e:
-        print(f"[❌ Gemini LLM 파싱 실패]: {e}")
+        print(f"[❌ LLM 파싱 실패]: {e}")
         return {
             "start_date": None,
             "end_date": None,
@@ -523,7 +523,7 @@ def answer(user_input: str, student_id: int = None, student_info: dict = None) -
 
         # ✅ 2단계: 신청 의도 처리 (조회보다 우선)
         if is_leave_intent(user_input):
-            print("🧭 [휴가 신청 의도 판단됨 → Gemini LLM 파싱 시도]")
+            print("🧭 [휴가/공가/병가/조퇴 신청 의도 판단됨 → LLM 파싱 시도]")
             info = extract_leave_info(user_input)
             start = info.get("start_date")
             end = info.get("end_date")
