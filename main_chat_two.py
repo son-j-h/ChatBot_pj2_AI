@@ -7,16 +7,13 @@ import json  # JSON 파싱을 위해 추가
 import datetime  # 시간 정보 출력을 위해 추가
 import re
 
-
-
 from langchain.agents import initialize_agent, Tool
 from langchain.agents.agent_types import AgentType
-from langchain.chat_models import ChatOpenAI
+from langchain_google_genai import GoogleGenerativeAI
 from langchain.prompts import PromptTemplate  # 프롬프트 템플릿 사용을 위해 추가
 from langchain.chains import LLMChain  # LLM 체인 사용을 위해 추가
 from langchain_core.prompts import PromptTemplate
 from langchain_core.messages import SystemMessage, HumanMessage
-
 
 # 핸들러 모듈들을 임포트합니다.
 # 실제 환경에서는 이 핸들러 파일들이 'handlers' 디렉토리 내에 존재해야 합니다.
@@ -29,26 +26,35 @@ from handlers import (
 )
 from db_utils import get_student_info
 
-
 # ✨ 실시간 벡터 메모리 활용을 위한 import
 from utils.chat_history import save_chat_to_vectorstore, retrieve_context
 
 # .env 파일에서 환경 변수를 로드합니다.
 load_dotenv()
-openai_key = os.getenv("OPENAI_API_KEY")
+google_api_key = os.getenv("GOOGLE_API_KEY")
 
 # 1. 일반적인 정보성 질문에 답변할 LLM을 정의합니다. (기존 llm)
 # 이 LLM은 각 핸들러 내부에서 사용되거나, 라우터/통합 LLM이 없을 경우의 폴백으로 사용될 수 있습니다.
-llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=openai_key)
+llm = GoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    google_api_key=google_api_key,
+    temperature=0
+)
 
 # 2. 사용자 질문을 분해하고 의도를 분류할 '라우터 LLM'을 정의합니다.
 # 이 LLM은 질문의 복잡성을 이해하고 여러 의도를 식별해야 하므로,
-# 가능하다면 gpt-4o, gpt-4-turbo 등 더 강력한 모델을 사용하는 것을 권장합니다.
-router_llm = ChatOpenAI(model_name="gpt-4o", temperature=0, openai_api_key=openai_key)
+# 가능하다면 더 강력한 모델을 사용하는 것을 권장합니다.
+router_llm = GoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    google_api_key=google_api_key,
+    temperature=0
+)
 
 # 3. 개별 답변들을 종합하여 최종 답변을 생성할 '통합 LLM'을 정의합니다.
-synthesizer_llm = ChatOpenAI(
-    model_name="gpt-4o", temperature=0.05, openai_api_key=openai_key
+synthesizer_llm = GoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    google_api_key=google_api_key,
+    temperature=0.05
 )
 
 # 기존의 툴 정의는 그대로 유지합니다. 각 툴은 특정 도메인의 질문에 답변하는 역할을 합니다.
@@ -92,19 +98,20 @@ CORS(app)
 # 욕설 필터링 함수 
 def is_profanity(text: str) -> bool:
     """
-    입력된 텍스트가 욕설이나 부적잘한 표현인지 여부를 판단합니다.
-    LLM을 활용한 필터링 방식입니다. 결과는 '예' 또는 '아니오'로 표시됩니다.
+    입력된 텍스트가 욕설이나 부적절한 표현인지 여부를 판단합니다.
+    Gemini를 활용한 필터링 방식입니다. 결과는 '예' 또는 '아니오'로 표시됩니다.
     """
-    system_prompt = "당신은 입력된 문장이 욕설 또는 부적절한 언어인지 판단하는 AI입니다."
-    question = f"문장: '{text}' -> 욕설인가요? 예/아니오로 대답하세요."
-
-    result = llm([
-       SystemMessage(content=system_prompt),
-       HumanMessage(content=question),
-    ])
-
-    return "예" in result.content
-
+    try:
+        prompt = f"""
+당신은 입력된 문장이 욕설 또는 부적절한 언어인지 판단하는 AI입니다.
+문장: '{text}' 
+이 문장이 욕설인가요? 예/아니오로만 대답하세요.
+"""
+        result = llm.invoke(prompt)
+        return "예" in result
+    except Exception as e:
+        print(f"욕설 필터링 오류: {e}")
+        return False
 
 # 로깅을 위한 헬퍼 함수
 def log_progress(message: str):
@@ -112,13 +119,11 @@ def log_progress(message: str):
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{timestamp}] {message}")
 
-
 # 각 세션 ID별로 학번, 학생 정보, 대화 상태를 저장
 session_data = {}
 STATE_INITIAL = "initial"  # 챗봇 시작 및 학번 요청
 STATE_ID_PENDING = "id_pending"  # 학번 입력 대기 중
 STATE_CONVERSATION_ACTIVE = "conversation_active"  # 일반적인 대화 중
-
 
 def extract_student_id(user_input: str) -> str or None:
     """
@@ -143,7 +148,6 @@ def extract_student_id(user_input: str) -> str or None:
 
     print(f"DEBUG: 학번 추출 실패: '{user_input}'에서 학번 패턴을 찾을 수 없음.")
     return None
-
 
 @app.route("/answer", methods=["POST"])
 def answer():
@@ -248,7 +252,6 @@ def answer():
         rag_context_docs = retrieve_context(user_input, student_id=current_student_id)
         rag_context = "\n".join([doc.page_content for doc in rag_context_docs])
 
-
         log_progress("rag_contextrag_context");
         log_progress(rag_context);
         
@@ -309,12 +312,7 @@ def answer():
             ]
         )
 
-<<<<<<< HEAD
-        router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template, verbose=True)
-=======
-
         router_chain = LLMChain(llm=router_llm, prompt=router_prompt_template)
->>>>>>> upstream/master
 
         # 라우터 LLM을 호출하여 의도 분류 결과를 받습니다.
         raw_routing_output = router_chain.run(
@@ -391,7 +389,6 @@ def answer():
             )
             intermediate_messages.append(f"'{tool_name}' 관련 정보를 조회하고 있어요...") # 개별 조회 시작 메시지
 
-
             # tool_name 또는 sub_question이 유효하지 않으면 건너뜁니다.
             if not tool_name or not sub_question:
                 log_progress(f"  경고: 유효하지 않은 의도 정보 스킵: {intent_info}")
@@ -452,7 +449,6 @@ def answer():
             f"모든 개별 핸들러 실행 완료. 수집된 개별 답변: {individual_responses}"
         )
         intermediate_messages.append("수집된 정보를 통합하여 답변을 정리하고 있어요...") # 답변 통합 시작 메시지
-
 
         # --------------------------------------------------------------------
         # 3단계: 답변 통합 (Response Synthesis)
@@ -526,7 +522,6 @@ def answer():
             ),
             500,
         )
-
 
 if __name__ == "__main__":
     # Flask 애플리케이션을 실행합니다.

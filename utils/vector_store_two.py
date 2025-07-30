@@ -1,18 +1,21 @@
 from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from dotenv import load_dotenv
 import os
 
-# 환경변수 로딩 (OpenAI 키)
+# 환경변수 로딩 (Google API 키)
 load_dotenv()
-openai_key = os.getenv("OPENAI_API_KEY")
+google_api_key = os.getenv("GOOGLE_API_KEY")
 
-# OpenAI 임베딩 모델 설정
-embedding_model = OpenAIEmbeddings(
-    openai_api_key=openai_key,
-    model="text-embedding-3-small"
+if not google_api_key:
+    raise EnvironmentError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
+
+# Google Gemini 임베딩 모델 설정
+embedding_model = GoogleGenerativeAIEmbeddings(
+    model="models/embedding-001",
+    google_api_key=google_api_key
 )
 
 # 벡터 DB 설정
@@ -24,8 +27,7 @@ print("▶ BASE_DIR:", BASE_DIR)
 print("▶ BASE_DIR contents:", os.listdir(BASE_DIR))
 
 # 파일 경로
-target_file = os.path.join(BASE_DIR,"training_handbook.txt")
-#target_file = "training_handbook.txt"
+target_file = os.path.join(BASE_DIR, "training_handbook.txt")
 if not os.path.exists(target_file):
     raise FileNotFoundError(f"❌ 파일 없음: {target_file}")
 
@@ -47,7 +49,7 @@ if not documents:
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 split_docs = splitter.split_documents(documents)
 
-# 벡터 DB 저장
+# 벡터 DB 저장 (Gemini 임베딩 모델 사용)
 vectorstore = Chroma.from_documents(
     documents=split_docs,
     embedding=embedding_model,
@@ -56,4 +58,4 @@ vectorstore = Chroma.from_documents(
 )
 
 vectorstore.persist()
-print("✅ 전체 문서 임베딩 및 Chroma 저장 완료")
+print("✅ 전체 문서 임베딩 및 Chroma 저장 완료 (Google Gemini 기반)")

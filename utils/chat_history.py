@@ -1,16 +1,19 @@
 from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.schema import Document
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
-openai_key = os.getenv("OPENAI_API_KEY")
+google_api_key = os.getenv("GOOGLE_API_KEY")
 
-# ✅ 1. OpenAI 임베딩 모델 설정
-embedding_model = OpenAIEmbeddings(
-    openai_api_key=openai_key,
-    model="text-embedding-3-small"
+if not google_api_key:
+    raise EnvironmentError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
+
+# ✅ 1. Google Gemini 임베딩 모델 설정
+embedding_model = GoogleGenerativeAIEmbeddings(
+    model="models/embedding-001",
+    google_api_key=google_api_key
 )
 
 # ✅ 2. 문서 기반 RAG 벡터 DB (읽기 전용)
@@ -51,6 +54,6 @@ def save_chat_to_vectorstore(user_input, response, student_id=None):
 
         memory_vectordb.add_documents([doc])
         memory_vectordb.persist()
-        print("✅ 실시간 대화 저장 완료")
+        print("✅ 실시간 대화 저장 완료 (Google Gemini 기반)")
     except Exception as e:
         print(f"❌ 대화 저장 실패: {e}")
