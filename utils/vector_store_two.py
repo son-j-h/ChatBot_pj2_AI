@@ -12,7 +12,7 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 if not google_api_key:
     raise EnvironmentError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-# Google Gemini 임베딩 모델 설정
+# 임베딩 모델 설정
 embedding_model = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
     google_api_key=google_api_key
@@ -49,7 +49,7 @@ if not documents:
 splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)
 split_docs = splitter.split_documents(documents)
 
-# 벡터 DB 저장 (Gemini 임베딩 모델 사용)
+# 벡터 DB 저장
 vectorstore = Chroma.from_documents(
     documents=split_docs,
     embedding=embedding_model,
@@ -58,4 +58,4 @@ vectorstore = Chroma.from_documents(
 )
 
 vectorstore.persist()
-print("✅ 전체 문서 임베딩 및 Chroma 저장 완료 (Google Gemini 기반)")
+print("✅ 전체 문서 임베딩 및 Chroma 저장 완료")
