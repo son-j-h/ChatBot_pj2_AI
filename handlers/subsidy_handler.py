@@ -16,10 +16,6 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 PERSIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../my_rag_db"))
 COLLECTION_NAME = "admin_docs"
 
-# 현재 날짜와 시간 정보
-CURRENT_DATE = datetime.datetime.now().strftime("%Y년 %m월 %d일")
-CURRENT_TIME = datetime.datetime.now().strftime("%H시 %M분")
-
 # --- 기존 코드의 1, 2, 3번 함수는 LLM 경쟁을 위해 약간 수정되거나 그대로 사용됩니다 ---
 
 # ✅ 1. 벡터 DB 로딩 (임베딩 모델은 GoogleGenerativeAIEmbeddings로 통일)
@@ -44,7 +40,6 @@ def load_vectorstore():
 def get_subsidy_prompt():
     system_template = """너는 패스트캠퍼스의 훈련장려금 전문 상담 챗봇이야.
 사용자의 질문에 대해 아래 참고 문서 내용만 기반으로 정확하고 친절하게 답변해.
-현재 날짜는 {current_date} {current_time} 입니다.
 
 - 참고 문서에 없는 정보는 "자료에 없음"이라고 말해.
 - 핵심 정보를 간결하고 쉽게 설명해 줘.
@@ -67,9 +62,7 @@ def build_llm_chain(llm_model):
     chain = (
         {
             "context": lambda x: "\n\n".join([doc.page_content for doc in retriever.get_relevant_documents(x["question"])]),
-            "question": lambda x: x["question"],
-            "current_date": lambda x: CURRENT_DATE, # 프롬프트에 현재 날짜 전달
-            "current_time": lambda x: CURRENT_TIME  # 프롬프트에 현재 시간 전달
+            "question": lambda x: x["question"]
         }
         | prompt
         | llm_model
@@ -190,13 +183,13 @@ def answer(question: str) -> str: # 비동기 제거
     llm_gemini_flash = GoogleGenerativeAI(
         model="gemini-2.5-flash-lite", # 첫 번째 경쟁 모델
         google_api_key=google_api_key,
-        temperature=0.2,
+        temperature=0.05,
         max_output_tokens=800
     )
     llm_gemini_pro = GoogleGenerativeAI(
         model="gemini-2.5-pro", # 두 번째 경쟁 모델
         google_api_key=google_api_key,
-        temperature=0.2,
+        temperature=0.05,
         max_output_tokens=800
     )
 
