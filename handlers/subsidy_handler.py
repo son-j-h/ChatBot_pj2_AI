@@ -1,13 +1,15 @@
 import os
 from langchain_community.vectorstores import Chroma
+from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
+
 from dotenv import load_dotenv
 
 # 환경변수 로드
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+google_api_key = os.getenv("GOOGLE_API_KEY")
 
 # 벡터 DB 저장 위치 및 설정
 PERSIST_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../my_rag_db"))
@@ -15,7 +17,10 @@ COLLECTION_NAME = "admin_docs"
 
 # ✅ 1. 벡터 DB 로딩만 수행 (생성 X)
 def load_vectorstore():
-    embedding = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=OPENAI_API_KEY)
+    embedding = GoogleGenerativeAIEmbeddings(
+    model="models/embedding-001",
+    google_api_key=google_api_key
+)
 
     if not os.path.exists(PERSIST_DIR):
         raise ValueError("❌ 벡터 DB 폴더가 존재하지 않습니다. 먼저 생성해 주세요.")
@@ -52,12 +57,17 @@ def get_subsidy_prompt():
 def build_chain():
     retriever = load_vectorstore()
 
-    llm = ChatOpenAI(
-        model_name="gpt-4o",
-        temperature=0,
-        max_tokens=800,
-        openai_api_key=OPENAI_API_KEY
-    )
+    # llm = ChatOpenAI(
+    #     model_name="gpt-4o",
+    #     temperature=0,
+    #     max_tokens=800,
+    #     openai_api_key=OPENAI_API_KEY
+    # )
+    llm = GoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    google_api_key=google_api_key,
+    temperature=0.2
+)
 
     prompt = get_subsidy_prompt()
 
