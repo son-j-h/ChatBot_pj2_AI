@@ -4,27 +4,27 @@ import re
 from datetime import datetime
 from dotenv import load_dotenv
 from langchain.vectorstores import Chroma
-from langchain.embeddings import OpenAIEmbeddings
-from langchain.chat_models import ChatOpenAI
+from langchain_google_genai import GoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain.chains import RetrievalQA
 import pymysql
 
 # ✅ 환경 변수 로드
 load_dotenv()
-openai_key = os.getenv("OPENAI_API_KEY")
+google_api_key = os.getenv("GOOGLE_API_KEY")
 
-if not openai_key:
-    raise EnvironmentError("OPENAI_API_KEY 환경 변수가 설정되지 않았습니다.")
+if not google_api_key:
+    raise EnvironmentError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-# ✅ 임베딩 + LLM 모델
-embedding_model = OpenAIEmbeddings(
-    openai_api_key=openai_key,
-    model="text-embedding-3-small"
+# ✅ 임베딩 + LLM 모델 (Gemini 기반)
+embedding_model = GoogleGenerativeAIEmbeddings(
+    model="models/embedding-001",
+    google_api_key=google_api_key
 )
-llm = ChatOpenAI(
-    model_name="gpt-3.5-turbo",
-    temperature=0.2,
-    openai_api_key=openai_key
+
+llm = GoogleGenerativeAI(
+    model="gemini-2.5-flash-lite",
+    google_api_key=google_api_key,
+    temperature=0.2
 )
 
 # ✅ 벡터스토어 (RAG)
@@ -45,7 +45,7 @@ qa_chain = RetrievalQA.from_chain_type(
 # ✅ 의도 판단 키워드
 INTENT_KEYWORDS = [
     "쓰고 싶", "신청", "할래", "싶어", "내고 싶",
-    "아프", "조퇴", "쉬고 싶", "쉴래", "조퇴할래", "병원", "몸이 안 좋아"
+    "아프", "조퇴", "쉬고 싶", "쉴래", "조퇴할래", "병원", "몸이 안 좋어"
 ]
 
 def is_leave_intent_rule(text: str) -> bool:
@@ -58,16 +58,35 @@ def is_leave_intent_llm(text: str) -> bool:
 문장: "{text}"
 """
     try:
-        response = llm.predict(prompt).strip().lower()
+        response = llm.invoke(prompt).strip().lower()
         return "예" in response
     except Exception as e:
-        print(f"[❌ LLM 판단 오류]: {e}")
+        print(f"[❌ Gemini LLM 판단 오류]: {e}")
         return False
 
 def is_leave_intent(text: str) -> bool:
     return is_leave_intent_rule(text) or is_leave_intent_llm(text)
 
-# ✅ LLM으로 날짜, 사유 파싱 (JSON 안전 파싱)
+# ✅ 조회 의도 판단 함수 (신규 추가)
+def is_inquiry_intent(text: str) -> bool:
+    """
+    조회 의도를 명확히 판단하는 함수
+    신청 의도와 겹치지 않도록 더 엄격한 조건 적용
+    """
+    inquiry_keywords = ["내역", "조회", "보여줘", "확인", "목록", "상태", "신청한"]
+    # 신청 의도 키워드가 포함되어 있으면 조회 의도로 보지 않음
+    apply_keywords = ["신청할", "할래", "하고 싶", "내고 싶", "쓰고 싶"]
+    
+    has_inquiry = any(keyword in text for keyword in inquiry_keywords)
+    has_apply = any(keyword in text for keyword in apply_keywords)
+    
+    # 신청 의도가 명확하면 조회로 보지 않음
+    if has_apply:
+        return False
+    
+    return has_inquiry
+
+# ✅ Gemini LLM으로 날짜, 사유 파싱 (JSON 안전 파싱)
 def extract_leave_info(user_input: str) -> dict:
     prompt = f"""
 다음 문장에서 조퇴/휴가 신청 정보를 JSON 형식으로 추출해 주세요.
@@ -93,11 +112,16 @@ def extract_leave_info(user_input: str) -> dict:
 문장: "{user_input}"
 """
     try:
-        response = llm.predict(prompt).strip()
-        print(f"🧠 [LLM 파싱 응답]:\n{response}")
+        response = llm.invoke(prompt).strip()
+        print(f"🧠 [Gemini LLM 파싱 응답]:\n{response}")
+        # JSON 코드 블록 제거 처리
+        if response.startswith("```json") and response.endswith("```"):
+            response = response[7:-3].strip()
+        elif response.startswith("```") and response.endswith("```"):
+            response = response[3:-3].strip()
         return json.loads(response)
     except Exception as e:
-        print(f"[❌ LLM 파싱 실패]: {e}")
+        print(f"[❌ Gemini LLM 파싱 실패]: {e}")
         return {
             "start_date": None,
             "end_date": None,
@@ -136,8 +160,8 @@ def insert_attendance_request(student_id, type_big, type_small, start_dt, end_dt
         print(f"[❌ DB insert 오류]: {e}")
         return False
 
-# ✅ DB 조회 (최근 신청 내역)
-def get_attendance_records(student_id: int) -> list:
+# ✅ DB 조회 (최근 신청 내역) - limit 매개변수 추가
+def get_attendance_records(student_id: int, limit: int = 10) -> list:
     try:
         db_port = int(os.getenv("MYSQL_PORT", 3306))
         conn = pymysql.connect(
@@ -153,9 +177,9 @@ def get_attendance_records(student_id: int) -> list:
                 SELECT * FROM ATTENDANCE_REQUESTS
                 WHERE STUDENT_ID = %s
                 ORDER BY REQUEST_AT DESC
-                LIMIT 10
+                LIMIT %s
             """
-            cursor.execute(sql, (student_id,))
+            cursor.execute(sql, (student_id, limit))
             result = cursor.fetchall()
         conn.close()
         return result
@@ -314,20 +338,21 @@ def cancel_attendance_request(request_id: int) -> bool:
         print(f"[❌ 신청 취소 오류]: {e}")
         return False
 
-# ✅ 취소 대상 식별을 위한 LLM 함수
+# ✅ 취소 대상 식별을 위한 함수 (자동 취소 제거, 목록 표시로 변경)
 def identify_cancel_target(user_input: str, pending_requests: list) -> dict:
     """
     사용자의 자연어 입력에서 취소하고자 하는 신청을 식별합니다.
+    명확한 ID 지정이 없으면 목록만 표시하고 자동 취소하지 않습니다.
     
     Args:
         user_input (str): 사용자 입력
         pending_requests (list): 대기중 신청 내역 리스트
         
     Returns:
-        dict: {"request_id": int 또는 None, "reason": str}
+        dict: {"request_id": int 또는 None, "reason": str, "show_list": bool}
     """
     if not pending_requests:
-        return {"request_id": None, "reason": "취소 가능한 신청이 없습니다."}
+        return {"request_id": None, "reason": "취소 가능한 신청이 없습니다.", "show_list": False}
     
     # 명시적인 ID 패턴 확인 (ID:123, REQUEST_ID:123 등)
     id_patterns = [
@@ -342,49 +367,70 @@ def identify_cancel_target(user_input: str, pending_requests: list) -> dict:
             request_id = int(match.group(1))
             # 해당 ID가 실제 대기중 신청에 있는지 확인
             if any(req['REQUEST_ID'] == request_id for req in pending_requests):
-                return {"request_id": request_id, "reason": f"신청 ID {request_id}번을 취소 대상으로 식별했습니다."}
+                return {
+                    "request_id": request_id, 
+                    "reason": f"신청 ID {request_id}번을 취소 대상으로 식별했습니다.",
+                    "show_list": False
+                }
             else:
-                return {"request_id": None, "reason": f"신청 ID {request_id}번은 취소 가능한 대기중 상태가 아닙니다."}
+                return {
+                    "request_id": None, 
+                    "reason": f"신청 ID {request_id}번은 취소 가능한 대기중 상태가 아닙니다.",
+                    "show_list": True
+                }
     
-    # LLM을 사용한 자연어 기반 식별
-    if len(pending_requests) == 1:
-        # 대기중 신청이 하나뿐이면 자동으로 그것을 선택
-        return {
-            "request_id": pending_requests[0]['REQUEST_ID'], 
-            "reason": "대기중인 신청이 하나뿐이므로 해당 신청을 취소 대상으로 선택했습니다."
-        }
-    
-    # 여러 신청이 있는 경우 LLM으로 매칭 시도
-    requests_info = ""
-    for i, req in enumerate(pending_requests, 1):
-        requests_info += f"{i}. ID:{req['REQUEST_ID']} - {req['TYPE_BIG']} ({req['START_DATETIME']} ~ {req['END_DATETIME']}) - {req['REASON']}\n"
-    
-    prompt = f"""
-사용자가 다음과 같이 말했습니다: "{user_input}"
+    # 명확한 ID 지정이 없으면 목록만 표시 (자동 취소 제거)
+    return {
+        "request_id": None, 
+        "reason": "취소하고자 하는 구체적인 신청을 특정할 수 없습니다.",
+        "show_list": True
+    }
 
-현재 취소 가능한 신청 목록:
-{requests_info}
-
-사용자가 취소하고 싶어하는 신청의 REQUEST_ID를 숫자로만 답변해주세요.
-명확하게 특정할 수 없다면 "불명확"이라고 답변해주세요.
-"""
+# ✅ 간결한 출결 내역 표시 함수 (신규 추가)
+def format_brief_attendance_records(records: list, title: str = "📋 최근 출결 신청 내역") -> str:
+    """
+    출결 신청 내역을 간결하게 포맷팅합니다.
     
-    try:
-        response = llm.predict(prompt).strip()
-        if response.isdigit():
-            request_id = int(response)
-            if any(req['REQUEST_ID'] == request_id for req in pending_requests):
-                return {"request_id": request_id, "reason": f"자연어 분석을 통해 신청 ID {request_id}번을 취소 대상으로 식별했습니다."}
+    Args:
+        records (list): 신청 내역 리스트
+        title (str): 표시할 제목
         
-        return {"request_id": None, "reason": "취소하고자 하는 구체적인 신청을 특정할 수 없습니다. 'ID:번호 취소' 형식으로 말씀해주세요."}
-    except Exception as e:
-        print(f"[❌ LLM 취소 대상 식별 오류]: {e}")
-        return {"request_id": None, "reason": "취소 대상 식별 중 오류가 발생했습니다."}
+    Returns:
+        str: 포맷팅된 문자열
+    """
+    if not records:
+        return "출결 신청 내역이 없습니다."
+    
+    response = f"{title} (최근 5건)\n"
+    for i, record in enumerate(records[:5], 1):  # 상위 5개만 표시
+        # 날짜 포맷팅 (시간 부분 제거)
+        start_date = str(record['START_DATETIME']).split(' ')[0] if record['START_DATETIME'] else 'N/A'
+        end_date = str(record['END_DATETIME']).split(' ')[0] if record['END_DATETIME'] else 'N/A'
+        
+        # 사유 간략화 (30자 제한)
+        reason = record['REASON'][:30] + '...' if len(record['REASON']) > 30 else record['REASON']
+        
+        response += (
+            f"\n{i}. 📅 {start_date}~{end_date} | "
+            f"📌 {record['TYPE_BIG']} | "
+            f"📊 {record['STATUS']} | "
+            f"📝 {reason}"
+        )
+    
+    if len(records) > 5:
+        response += f"\n\n... 외 {len(records) - 5}건 더 있습니다."
+    
+    return response.strip()
 
-# ✅ 메인 응답 핸들러
+# ✅ 메인 응답 핸들러 (우선순위 및 로직 개선)
 def answer(user_input: str, student_id: int = None, student_info: dict = None) -> str:
     """
     휴가/병가/공가/조퇴 관련 질문에 대한 통합 처리 함수
+    개선된 의도 분기 우선순위:
+    1. 취소 요청 처리
+    2. 신청 의도 처리
+    3. 조회 의도 처리
+    4. 일반 정보 질문 (RAG)
     
     Args:
         user_input (str): 사용자 입력
@@ -400,7 +446,7 @@ def answer(user_input: str, student_id: int = None, student_info: dict = None) -
         student_id = 1
 
     try:
-        # ✅ 1단계: 취소 요청 처리 (개선됨)
+        # ✅ 1단계: 취소 요청 처리 (최우선)
         if "취소" in user_input:
             print("🚫 [취소 의도 감지됨]")
             
@@ -418,13 +464,13 @@ def answer(user_input: str, student_id: int = None, student_info: dict = None) -
             pending_requests = []
             target_type = None
             
-            # 1. 전체 출결 취소 요청
+            # 전체 출결 취소 요청
             if "출결" in user_input:
                 print("🔍 [전체 출결 취소 요청 감지]")
                 pending_requests = get_pending_attendance_requests(student_id)
                 target_type = "출결"
             else:
-                # 2. 유형별 취소 요청
+                # 유형별 취소 요청
                 for leave_type in ["휴가", "병가", "공가", "조퇴"]:
                     if leave_type in user_input:
                         print(f"🔍 [{leave_type} 취소 요청 감지]")
@@ -432,7 +478,7 @@ def answer(user_input: str, student_id: int = None, student_info: dict = None) -
                         target_type = leave_type
                         break
                 
-                # 유형이 명시되지 않았다면 전체 조회 (기존 호환성)
+                # 유형이 명시되지 않았다면 전체 조회
                 if not pending_requests and not target_type:
                     print("🔍 [일반 취소 요청 - 전체 조회]")
                     pending_requests = get_pending_attendance_requests(student_id)
@@ -445,103 +491,39 @@ def answer(user_input: str, student_id: int = None, student_info: dict = None) -
                 else:
                     return "취소 가능한 대기중 상태의 신청 내역이 없습니다."
             
-            # 취소 대상 식별
+            # 취소 대상 식별 (자동 취소 제거됨)
             cancel_result = identify_cancel_target(user_input, pending_requests)
             
             if cancel_result["request_id"]:
-                # 취소 실행
+                # 명확한 ID가 있을 때만 취소 실행
                 success = cancel_attendance_request(cancel_result["request_id"])
                 if success:
                     return f"✅ 신청 ID {cancel_result['request_id']}번이 성공적으로 취소되었습니다."
                 else:
                     return f"❌ 신청 ID {cancel_result['request_id']}번 취소 처리 중 오류가 발생했습니다."
             else:
-                # 취소 가능한 목록 표시
+                # 목록 표시 및 선택 유도
                 type_display = f" ({target_type})" if target_type and target_type != "전체" else ""
                 response = f"🛑 취소 가능한 신청 내역{type_display}:\n"
                 for i, req in enumerate(pending_requests, 1):
+                    start_date = str(req['START_DATETIME']).split(' ')[0] if req['START_DATETIME'] else 'N/A'
+                    end_date = str(req['END_DATETIME']).split(' ')[0] if req['END_DATETIME'] else 'N/A'
+                    reason_brief = req['REASON'][:20] + '...' if len(req['REASON']) > 20 else req['REASON']
+                    
                     response += (
-                        f"\n🔸 신청 {i}번 (ID: {req['REQUEST_ID']})\n"
-                        f"  📅 {req['START_DATETIME']} ~ {req['END_DATETIME']}\n"
-                        f"  📝 사유: {req['REASON']}\n"
-                        f"  📌 유형: {req['TYPE_BIG']} / {req['TYPE_SMALL']}\n"
-                        f"  📊 상태: {req['STATUS']}"
+                        f"\n🔸 {i}번 (ID: {req['REQUEST_ID']}) | "
+                        f"📅 {start_date}~{end_date} | "
+                        f"📌 {req['TYPE_BIG']} | "
+                        f"📝 {reason_brief}"
                     )
+                
                 response += f"\n\n{cancel_result['reason']}"
-                response += "\n취소하려면 'ID:숫자 취소'라고 말해주세요. 예: ID:123 취소"
+                response += "\n💡 취소하려면 'ID:숫자 취소'라고 말해주세요. 예: ID:123 취소"
                 return response
 
-        # ✅ 2단계: 신청 내역 조회 처리 (상태값 제한 없음)
-        # 2-1: 출결 신청 전체 내역 조회
-        if "출결" in user_input and any(kw in user_input for kw in ["내역", "신청", "조회", "보여줘", "확인", "목록"]):
-            print("🔎 [출결 신청 전체 내역 조회 의도 감지됨]")
-            all_records = get_attendance_records(student_id)
-            
-            if not all_records:
-                return "출결 신청 내역이 없습니다."
-            
-            response = "📋 출결 신청 내역 (전체)\n"
-            for i, req in enumerate(all_records, 1):
-                response += (
-                    f"\n🔹 신청 {i}번 (ID: {req.get('REQUEST_ID', 'N/A')})\n"
-                    f"  📅 {req['START_DATETIME']} ~ {req['END_DATETIME']}\n"
-                    f"  📝 사유: {req['REASON']}\n"
-                    f"  📌 유형: {req['TYPE_BIG']} / {req['TYPE_SMALL']}\n"
-                    f"  📊 상태: {req['STATUS']}\n"
-                )
-            return response.strip()
-        
-        # 2-2: 특정 유형별 신청 내역 조회 (상태값 제한 없음)
-        for leave_type in ["휴가", "병가", "공가", "조퇴"]:
-            if leave_type in user_input and any(kw in user_input for kw in ["내역", "신청", "조회", "보여줘", "확인", "목록"]):
-                print(f"🔎 [{leave_type} 신청 내역 조회 의도 감지됨]")
-                type_records = get_attendance_records_by_type(student_id, leave_type)
-                
-                if not type_records:
-                    return f"{leave_type} 신청 내역이 없습니다."
-                
-                response = f"📋 신청 내역 ({leave_type})\n"
-                for i, req in enumerate(type_records, 1):
-                    response += (
-                        f"\n🔹 신청 {i}번 (ID: {req['REQUEST_ID']})\n"
-                        f"  📅 {req['START_DATETIME']} ~ {req['END_DATETIME']}\n"
-                        f"  📝 사유: {req['REASON']}\n"
-                        f"  📌 유형: {req['TYPE_BIG']} / {req['TYPE_SMALL']}\n"
-                        f"  📊 상태: {req['STATUS']}\n"
-                    )
-                return response.strip()
-
-        # ✅ 3단계: 기존 호환성을 위한 일반 조회 (레거시)
-        if any(k in user_input for k in ["내역", "조회", "신청한", "상태", "확인"]):
-            print("🔎 [일반 조회 의도 감지됨]")
-            records = get_attendance_records(student_id)
-
-            # 유형 필터
-            filter_type = None
-            for t in ["휴가", "병가", "공가", "조퇴"]:
-                if t in user_input:
-                    filter_type = t
-                    break
-            if filter_type:
-                records = [r for r in records if r["TYPE_BIG"] == filter_type]
-
-            if not records:
-                return "최근 신청 내역이 없습니다."
-
-            response = "📋 최근 신청 내역 (호환성)\n"
-            for i, r in enumerate(records, 1):
-                response += (
-                    f"\n🔹 신청 {i}번 (ID: {r.get('REQUEST_ID', 'N/A')})\n"
-                    f"  📅 {r['START_DATETIME']} ~ {r['END_DATETIME']}\n"
-                    f"  📝 사유: {r['REASON']}\n"
-                    f"  📌 유형: {r['TYPE_BIG']} / {r['TYPE_SMALL']}\n"
-                    f"  📊 상태: {r['STATUS']}\n"
-                )
-            return response.strip()
-
-        # ✅ 4단계: 신청 처리
+        # ✅ 2단계: 신청 의도 처리 (조회보다 우선)
         if is_leave_intent(user_input):
-            print("🧭 [휴가 신청 의도 판단됨 → LLM 파싱 시도]")
+            print("🧭 [휴가 신청 의도 판단됨 → Gemini LLM 파싱 시도]")
             info = extract_leave_info(user_input)
             start = info.get("start_date")
             end = info.get("end_date")
@@ -551,9 +533,11 @@ def answer(user_input: str, student_id: int = None, student_info: dict = None) -
 
             if not (start and end and reason):
                 return (
-                    f"{type_big}를 신청하시려는 것 같네요!\n"
-                    "📅 언제부터 언제까지 예정인가요?\n"
-                    "📝 그리고 사유도 함께 알려주세요!"
+                    f"✨ {type_big}를 신청하시려는 것 같네요!\n\n"
+                    "다음 정보를 함께 알려주세요:\n"
+                    "📅 기간: 언제부터 언제까지인가요?\n"
+                    "📝 사유: 어떤 이유인가요?\n\n"
+                    "예시: '8월 1일부터 8월 3일까지 개인 사정으로 휴가 신청할래요'"
                 )
 
             success = insert_attendance_request(
@@ -567,15 +551,56 @@ def answer(user_input: str, student_id: int = None, student_info: dict = None) -
 
             if success:
                 return (
-                    f"✅ {type_big} 신청이 정상적으로 접수되었습니다!\n"
-                    f"⏰ 기간: {start} ~ {end}\n"
-                    f"📝 사유: {reason}\n"
-                    f"승인까지 잠시 기다려주세요."
+                    f"✅ {type_big} 신청이 정상적으로 접수되었습니다!\n\n"
+                    f"📅 기간: {start} ~ {end}\n"
+                    f"📌 유형: {type_big} / {type_small}\n"
+                    f"📝 사유: {reason}\n\n"
+                    f"승인까지 잠시 기다려주세요. 🙏"
                 )
             else:
                 return "❌ 신청 처리 중 오류가 발생했습니다. 다시 시도해주세요."
 
-        # ✅ 5단계: 일반 정보 질문 (RAG)
+        # ✅ 3단계: 조회 의도 처리 (신청 의도 이후)
+        if is_inquiry_intent(user_input):
+            print("🔎 [조회 의도 감지됨]")
+            
+            # 3-1: 출결 신청 전체 내역 조회 (간결 버전)
+            if "출결" in user_input:
+                print("🔎 [출결 신청 전체 내역 조회 의도 감지됨]")
+                all_records = get_attendance_records(student_id, limit=5)  # 상위 5개만
+                return format_brief_attendance_records(all_records, "📋 최근 출결 신청 내역")
+            
+            # 3-2: 특정 유형별 신청 내역 조회
+            for leave_type in ["휴가", "병가", "공가", "조퇴"]:
+                if leave_type in user_input:
+                    print(f"🔎 [{leave_type} 신청 내역 조회 의도 감지됨]")
+                    type_records = get_attendance_records_by_type(student_id, leave_type)
+                    
+                    if not type_records:
+                        return f"{leave_type} 신청 내역이 없습니다."
+                    
+                    return format_brief_attendance_records(type_records[:5], f"📋 {leave_type} 신청 내역")
+            
+            # 3-3: 일반 조회 (기존 호환성 유지)
+            print("🔎 [일반 조회 의도 감지됨]")
+            records = get_attendance_records(student_id, limit=5)  # 상위 5개만
+
+            # 유형 필터 (호환성)
+            filter_type = None
+            for t in ["휴가", "병가", "공가", "조퇴"]:
+                if t in user_input:
+                    filter_type = t
+                    break
+            if filter_type:
+                records = [r for r in records if r["TYPE_BIG"] == filter_type]
+
+            if not records:
+                return "최근 신청 내역이 없습니다."
+
+            title = f"📋 최근 {filter_type} 신청 내역" if filter_type else "📋 최근 신청 내역"
+            return format_brief_attendance_records(records, title)
+
+        # ✅ 4단계: 일반 정보 질문 (RAG)
         print("🔍 [일반 정보 질의 → 문서 검색]")
         result = qa_chain(user_input)
         return str(result["result"])
