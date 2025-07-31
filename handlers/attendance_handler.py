@@ -20,20 +20,20 @@ google_api_key = os.getenv("GOOGLE_API_KEY")
 if not google_api_key:
     raise EnvironmentError("GOOGLE_API_KEY 환경 변수가 설정되지 않았습니다.")
 
-# Gemini 모델 초기화 (main_chat_two.py와 동일한 설정)
+# Gemini 모델 초기화 (main_chat.py와 동일한 설정)
 llm = GoogleGenerativeAI(
     model="gemini-2.5-flash-lite",
     google_api_key=google_api_key,
     temperature=0
 )
 
-# vector_store_two.py에서 사용한 것과 동일한 임베딩 모델 사용
+# vector_store.py에서 사용한 것과 동일한 임베딩 모델 사용
 embeddings = GoogleGenerativeAIEmbeddings(
     model="models/embedding-001",
     google_api_key=google_api_key
 )
 
-# 벡터DB 경로 설정 (vector_store_two.py와 동일한 경로)
+# 벡터DB 경로 설정 (vector_store.py와 동일한 경로)
 vector_db_path = os.path.join(base_dir, "my_rag_db")
 collection_name = "admin_docs"
 
